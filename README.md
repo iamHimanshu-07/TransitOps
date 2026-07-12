@@ -1,108 +1,110 @@
 # 🚚 TransitOps — Smart Transport Operations Platform
 
-A responsive, modern, **strict dark-mode** web application for fleet, drivers, trips, maintenance, fuel/expenses, analytics, and RBAC control.
+A complete end-to-end **Node.js / Express** transport operations platform with
+SQLite persistence, JWT authentication, role-based access control, and a
+polished single-page frontend (light + dark mode).
 
-Built by **Vaelos** · 2026
+## ✨ Features
 
----
+| Area | What's included |
+|---|---|
+| **Auth & RBAC** | Login + JWT in httpOnly cookie, 4 roles (Fleet Manager, Driver, Safety Officer, Financial Analyst) |
+| **Dashboard** | KPIs: Active/Available/In-Shop vehicles, Active/Pending trips, Drivers on Duty, Fleet Utilization % |
+| **Vehicle Registry** | CRUD with unique reg, max load, odometer, cost, region, status |
+| **Driver Management** | License, expiry, safety score, status, auto-flagged expired licenses |
+| **Trip Management** | Draft → Dispatched → Completed → Cancelled, full validations |
+| **Maintenance** | Auto-flips vehicle to *In Shop*; closing restores to *Available* (unless Retired) |
+| **Fuel & Expenses** | Liters/cost logs, tolls/misc; auto-compute operational cost per vehicle |
+| **Reports & Analytics** | Fuel efficiency, operational cost, **Vehicle ROI = (Revenue − (Maint+Fuel))/Acquisition** |
+| **CSV export** | Per-vehicle metrics |
+| **PDF export** | Printable HTML → "Save as PDF" via browser |
+| **Notifications** | License expiry reminders (expired + within 60 days) |
+| **Light / Dark mode** | Toggle, persisted in localStorage |
 
-## ▶ Quick Start
+## 🛡️ Business Rules (all enforced server-side)
 
-The frontend is a static SPA — no build step required.
+1. Vehicle registration number is unique
+2. Retired or In Shop vehicles never appear in dispatch selection
+3. Drivers with expired licenses or *Suspended* status cannot be assigned
+4. A driver or vehicle already marked *On Trip* cannot take another trip
+5. Cargo weight must not exceed the vehicle's max load
+6. Dispatching a trip → both vehicle & driver become *On Trip*
+7. Completing a trip → both become *Available*
+8. Cancelling a dispatched trip → both restored to *Available*
+9. Creating active maintenance → vehicle becomes *In Shop*
+10. Closing maintenance → vehicle becomes *Available* (unless *Retired*)
 
-### Option A — Open directly
-Open `public/index.html` in any modern browser.
+## 🚀 Quick Start
 
-### Option B — Serve with a simple HTTP server (recommended)
 ```bash
-# Python 3
-cd public
-python -m http.server 5500
-# then open http://localhost:5500
+cd "C:/Users/Lenovo/TransitOps"
+npm install
+npm run init-db    # creates transitops.db + seeds demo data
+npm start          # starts server on http://localhost:3000
 ```
-or
+
+Then open **http://localhost:3000** in your browser.
+
+## 👤 Demo Accounts
+
+| Role | Email | Password |
+|---|---|---|
+| Fleet Manager | admin@transitops.com | admin123 |
+| Driver | alex@transitops.com | driver123 |
+| Safety Officer | sarah@transitops.com | safety123 |
+| Financial Analyst | felix@transitops.com | finance123 |
+
+## 🧪 Run Business-Rules Tests
+
 ```bash
-# Node (npx)
-npx serve public -l 5500
+npm test
 ```
 
----
+The test suite exercises every business rule and prints PASS/FAIL per case.
 
-## 🔐 Demo Login
-
-| Field    | Value                  |
-|----------|------------------------|
-| Email    | `raven@transitops.com` |
-| Password | `demo123`              |
-| Role     | any of the 4 options   |
-
-Wrong credentials trigger the red-dotted "Error state: Invalid credentials" alert box.
-
----
-
-## 🎨 Theme Tokens
-
-| Token            | Value      | Use                                      |
-|------------------|------------|------------------------------------------|
-| `--bg-canvas`    | `#121212`  | App canvas (deep charcoal)               |
-| `--bg-panel`     | `#1E1E1E`  | Cards, tables, sidebar, topbar           |
-| `--primary`      | `#E07A5F`  | Primary buttons, active nav border       |
-| `--success`      | `#81B29A`  | Available, Completed, On Duty            |
-| `--info`         | `#3D5A80`  | On Trip, Dispatched, view-permission     |
-| `--warning`      | `#F2A65A`  | Suspended, In Shop                       |
-| `--error`        | `#E63946`  | Retired, alert banners                   |
-
----
-
-## 🗂 Implemented Views
-
-| # | View                     | Highlights                                                                       |
-|---|--------------------------|----------------------------------------------------------------------------------|
-| 0 | **Auth (split-screen)**  | Light-gray brand panel · dark login card · role dropdown · red dotted error      |
-| 1 | **Dashboard**            | 7 KPI cards · Recent Trips table · Vehicle Status horizontal multi-color bars    |
-| 2 | **Fleet Registry**       | Type/Status filters · search · "+ Add Vehicle" · 7-column table                  |
-| 3 | **Drivers**              | License expiry with red "EXPIRED" · 4 color-coded toggle blocks                  |
-| 4 | **Trips (Dispatcher)**   | Capacity alert blocks dispatch when weight > vehicle max · Live Board stepper    |
-| 5 | **Maintenance**          | Left form · right service log table with dynamic row badges                      |
-| 6 | **Fuel & Expenses**      | Fuel logs + other expenses + auto "Total Operational Cost" summary line         |
-| 7 | **Analytics**            | 4 metric cards · Monthly Revenue vertical bars · Top Costliest horizontal stacked |
-| 8 | **Settings + RBAC**      | General settings form · RBAC matrix grid (5 features × 4 roles)                  |
-
----
-
-## 📁 Project Layout
+## 📂 Project Structure
 
 ```
 TransitOps/
-├── public/
-│   ├── index.html    # single-page app shell
-│   ├── style.css     # strict dark-mode theme + all view styles
-│   └── app.js        # SPA logic, mock data, all 8 view renderers
-└── README.md
+├── server.js              # Express server + REST API
+├── database.js            # better-sqlite3 schema, auth, seed
+├── operations.js          # Business logic, validations, status transitions
+├── test_business_rules.js # End-to-end smoke test
+├── public/                # Static frontend (HTML/CSS/JS)
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── transitops.db          # SQLite (auto-created)
+└── package.json
 ```
 
----
+## 🔁 Example Workflow (Van-05 / Alex / 450 kg)
 
-## 🧠 Architectural Notes
+1. Register `VAN-05` (500 kg max) — status: Available
+2. Register `Alex` with valid license
+3. Create a trip with 450 kg cargo
+4. System validates 450 ≤ 500 and creates Draft
+5. **Dispatch** → Vehicle + Driver both become *On Trip*
+6. **Complete** with final odometer + fuel consumed → both *Available*
+7. Create **Maintenance** record (e.g., Oil Change) → Vehicle → *In Shop*
+8. **Close maintenance** → Vehicle → *Available*
+9. **Reports** show updated operational cost and fuel efficiency
 
-- **Vanilla JS, no build step** — drop-in ready for any backend.
-- **Mock data lives in `DATA`** inside `app.js`. Swap each `DATA.*` fetch with real `fetch('/api/...')` calls when wiring a backend.
-- **Role-aware session** — topbar pill (`Dispatcher [RX]`, `Fleet Manager [RX]`, etc.) reflects the role chosen at login.
-- **RBAC matrix** is rendered from a single source of truth (`DATA.rbac`) — easy to update without touching layout.
-- **Responsive** — sidebar collapses below 720 px; KPI grids reflow 7→4→2 columns; analytics grid reflows to single column.
+## 🔌 REST API (selected)
 
----
-
-## 🔌 Wiring a Real Backend (optional)
-
-Replace each mock reference with a `fetch` call, e.g.:
-
-```js
-const vehicles = await fetch('/api/vehicles').then(r => r.json());
-```
-
-The table renderers accept any object with the same shape (`reg`, `name`, `type`, `capacity`, `odometer`, `cost`, `status`).
-
----
-
-© 2026 Vaelos · TransitOps
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/auth/login` | Login → returns user + JWT |
+| GET  | `/api/vehicles?type=...&status=...&region=...` | List vehicles |
+| POST | `/api/vehicles` | Create vehicle |
+| PUT  | `/api/vehicles/:id` | Update vehicle |
+| GET  | `/api/drivers` | List drivers |
+| POST | `/api/trips` | Create trip (Draft) — validates all rules |
+| POST | `/api/trips/:id/dispatch` | Dispatch (auto-flips statuses) |
+| POST | `/api/trips/:id/complete` | Complete (restores statuses, logs fuel) |
+| POST | `/api/trips/:id/cancel` | Cancel (restores statuses if Dispatched) |
+| POST | `/api/maintenance` | Open maintenance (auto In Shop) |
+| POST | `/api/maintenance/:id/close` | Close maintenance (restores Available) |
+| GET  | `/api/fuel` / `/api/expenses` | Logs |
+| GET  | `/api/metrics` | Per-vehicle fuel efficiency, cost, ROI |
+| GET  | `/api/notifications` | License expiry notifications |

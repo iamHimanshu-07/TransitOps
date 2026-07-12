@@ -1,903 +1,1059 @@
-/* ============================================================
-   TransitOps — Frontend SPA  (Vaelos · 2026)
-   Vanilla JS, mock data, role-aware nav.
-   ============================================================ */
+/* TransitOps - Frontend single-page app
+ * Vanilla JS, fetch-based, JWT in httpOnly cookie, role-aware navigation.
+ */
 
-const APP = {
+const API = '/api';
+let state = {
   user: null,
   page: 'dashboard',
-  settings: {
-    depotName: 'Vaelos Central Depot',
-    currency: 'USD',
-    distanceUnit: 'km',
-  },
+  cache: {},
+  theme: localStorage.getItem('theme') || 'light',
 };
 
-/* ---------- helpers ---------- */
-const $  = (s, r = document) => r.querySelector(s);
-const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
-  { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
-));
-const fmt$ = (n) => '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+// Apply theme as soon as possible to avoid flash
+document.documentElement.setAttribute('data-theme', state.theme);
 
-/* ============================================================
-   0. AUTH (login + error state)
-   ============================================================ */
-$('#login-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const errBox = $('#login-error');
-  errBox.classList.add('hidden');
+// =================== Helpers =================== //
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const email    = $('#email').value.trim();
-  const password = $('#password').value;
-  const role     = $('#role').value;
-  const remember = $('#remember').checked;
-
-  if (!email || !password) {
-    errBox.classList.remove('hidden');
-    errBox.innerHTML = '<strong>Error state:</strong> Please enter both email and password.';
-    return;
-  }
-
-  // Demo credentials
-  if (email === 'raven@transitops.com' && password === 'demo123') {
-    APP.user = { name: 'Raven K.', email, role, remember };
-    sessionStorage.setItem('transitops_user', JSON.stringify(APP.user));
-    if (remember) localStorage.setItem('transitops_user_remember', JSON.stringify(APP.user));
-    enterApp();
-  } else {
-    errBox.classList.remove('hidden');
-    errBox.innerHTML = '<strong>Error state:</strong> Invalid credentials. Please verify your email, password, and role.';
-  }
-});
-
-function enterApp() {
-  $('#auth-page').classList.add('hidden');
-  $('#app').classList.remove('hidden');
-  $('#role-pill').textContent = `${APP.user.role} [RX]`;
-  buildNav();
-  navigate('dashboard');
+function toast(msg, kind = 'success') {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = `toast ${kind}`;
+  t.classList.remove('hidden');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
 }
 
-/* Logout */
-$('#logout-btn').addEventListener('click', () => {
-  APP.user = null;
-  sessionStorage.removeItem('transitops_user');
+async function api(path, options = {}) {
+  const res = await fetch(API + path, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  if (res.status === 401) {
+    showLogin();
+    throw new Error('Not authenticated');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtINR(n) { return '₹ ' + Number(n || 0).toLocaleString('en-IN'); }
+function fmtKm(n) { return Number(n || 0).toLocaleString('en-IN'); }
+
+// =================== Auth =================== //
+function showLogin() {
   $('#app').classList.add('hidden');
-  $('#auth-page').classList.remove('hidden');
-  $('#login-form').reset();
+  $('#login-screen').classList.remove('hidden');
+  state.user = null;
+}
+function showApp() {
+  $('#login-screen').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  $('#user-name').textContent = state.user.name;
+  $('#user-role').textContent = state.user.role;
+  buildNav();
+  navigate(state.page);
+}
+
+$('#login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#login-error').textContent = '';
+  try {
+    const { user } = await api('/auth/login', {
+      method: 'POST',
+      body: { email: $('#email').value, password: $('#password').value },
+    });
+    state.user = user;
+    toast(`Welcome, ${user.name}!`);
+    showApp();
+  } catch (err) {
+    $('#login-error').textContent = err.message;
+  }
 });
 
-/* Auto-login if session */
-(function boot() {
-  const cached = sessionStorage.getItem('transitops_user')
-              || localStorage.getItem('transitops_user_remember');
-  if (cached) {
-    try {
-      APP.user = JSON.parse(cached);
-      enterApp();
-    } catch {}
-  }
-})();
+$('#logout-btn').addEventListener('click', async () => {
+  await api('/auth/logout', { method: 'POST' });
+  showLogin();
+});
 
-/* ============================================================
-   NAV
-   ============================================================ */
-const NAV = [
-  { id: 'dashboard',   label: 'Dashboard' },
-  { id: 'fleet',       label: 'Fleet' },
-  { id: 'drivers',     label: 'Drivers' },
-  { id: 'trips',       label: 'Trips' },
-  { id: 'maintenance', label: 'Maintenance' },
-  { id: 'fuel',        label: 'Fuel & Expenses' },
-  { id: 'analytics',   label: 'Analytics' },
-  { id: 'settings',    label: 'Settings' },
+$('#theme-toggle').addEventListener('click', () => {
+  state.theme = state.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', state.theme);
+  localStorage.setItem('theme', state.theme);
+});
+
+// =================== Navigation =================== //
+const NAV_ITEMS = [
+  { id: 'dashboard',     label: '📊 Dashboard',       roles: ['*'] },
+  { id: 'vehicles',      label: '🚐 Vehicles',        roles: ['*'] },
+  { id: 'drivers',       label: '👤 Drivers',         roles: ['*'] },
+  { id: 'trips',         label: '📦 Trips',           roles: ['*'] },
+  { id: 'maintenance',   label: '🛠️ Maintenance',     roles: ['*'] },
+  { id: 'fuel',          label: '⛽ Fuel & Expenses', roles: ['*'] },
+  { id: 'reports',       label: '📈 Reports',         roles: ['*'] },
+  { id: 'notifications', label: '🔔 Notifications',   roles: ['*'] },
+  { id: 'users',         label: '👥 Users',           roles: ['Fleet Manager'] },
 ];
+
 function buildNav() {
   const nav = $('#nav');
-  nav.innerHTML = NAV.map(n => `
-    <button class="nav-item ${n.id === APP.page ? 'active' : ''}" data-page="${n.id}">
-      <span class="nav-icon">${
-        { dashboard:'📊', fleet:'🚐', drivers:'👤', trips:'📦',
-          maintenance:'🛠️', fuel:'⛽', analytics:'📈', settings:'⚙️' }[n.id]
-      }</span><span>${n.label}</span>
-    </button>
-  `).join('');
-  $$('#nav .nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.page)));
+  nav.innerHTML = '';
+  for (const item of NAV_ITEMS) {
+    if (!item.roles.includes('*') && !item.roles.includes(state.user.role)) continue;
+    const btn = document.createElement('button');
+    btn.textContent = item.label;
+    btn.dataset.page = item.id;
+    if (state.page === item.id) btn.classList.add('active');
+    btn.addEventListener('click', () => navigate(item.id));
+    nav.appendChild(btn);
+  }
 }
+
 function navigate(page) {
-  APP.page = page;
-  $$('#nav .nav-item').forEach(b => b.classList.toggle('active', b.dataset.page === page));
-  const titles = {
-    dashboard:'Dashboard', fleet:'Vehicle Registry', drivers:'Driver Management',
-    trips:'Trip Dispatcher', maintenance:'Maintenance Workflow',
-    fuel:'Fuel & Expenses', analytics:'Reports & Analytics', settings:'Settings & RBAC'
-  };
+  state.page = page;
+  $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
+  const titles = { dashboard:'Operations Dashboard', vehicles:'Vehicle Registry', drivers:'Driver Management',
+    trips:'Trip Management', maintenance:'Maintenance', fuel:'Fuel & Expenses', reports:'Reports & Analytics',
+    notifications:'Notifications', users:'User Management' };
   $('#page-title').textContent = titles[page] || page;
   render();
 }
 
-/* ============================================================
-   MOCK DATA
-   ============================================================ */
-const DATA = {
-  kpis: {
-    active: 18, available: 22, maint: 7, activeTrips: 12, pending: 5,
-    driversOnDuty: 16, utilization: 78,
+// =================== Modal =================== //
+const modal = {
+  open(title, bodyHTML, onMount) {
+    $('#modal-title').textContent = title;
+    $('#modal-body').innerHTML = bodyHTML;
+    $('#modal-backdrop').classList.remove('hidden');
+    if (onMount) onMount($('#modal-body'));
   },
-  statusDistribution: {
-    Available: 22, 'On Trip': 18, 'In Shop': 7, Suspended: 4, Retired: 3,
-    total: 54,
-  },
-  recentTrips: [
-    { id: 'TR-1042', vehicle: 'VH-012', driver: 'A. Patel',  status: 'Dispatched', eta: '14:20' },
-    { id: 'TR-1041', vehicle: 'VH-007', driver: 'M. Singh',  status: 'On Trip',    eta: '15:05' },
-    { id: 'TR-1040', vehicle: 'VH-019', driver: 'L. Okonkwo',status: 'Completed',   eta: '—' },
-    { id: 'TR-1039', vehicle: 'VH-003', driver: 'S. Tanaka',  status: 'Dispatched', eta: '15:40' },
-    { id: 'TR-1038', vehicle: 'VH-021', driver: 'R. Costa',   status: 'Cancelled',   eta: '—' },
-    { id: 'TR-1037', vehicle: 'VH-014', driver: 'D. Müller',  status: 'On Trip',    eta: '16:00' },
-    { id: 'TR-1036', vehicle: 'VH-009', driver: 'P. Adisa',   status: 'Completed',   eta: '—' },
-  ],
-  vehicles: [
-    { reg: 'VH-001', name: 'Ford Transit',     type: 'Van',   capacity: 1200, odometer: 84210, cost: 38000, status: 'Available' },
-    { reg: 'VH-002', name: 'Mercedes Sprinter',type: 'Van',   capacity: 1500, odometer: 121000,cost: 52000, status: 'On Trip' },
-    { reg: 'VH-003', name: 'Iveco Daily',      type: 'Truck', capacity: 3500, odometer: 158430,cost: 64000, status: 'Available' },
-    { reg: 'VH-004', name: 'Volvo FH16',       type: 'Truck', capacity: 18000,odometer: 220100,cost: 145000,status: 'In Shop' },
-    { reg: 'VH-005', name: 'Toyota Hiace',     type: 'Van',   capacity: 1000, odometer: 56000, cost: 32000, status: 'Available' },
-    { reg: 'VH-006', name: 'Renault Master',   type: 'Van',   capacity: 1300, odometer: 92010, cost: 41000, status: 'On Trip' },
-    { reg: 'VH-007', name: 'MAN TGX',          type: 'Truck', capacity: 22000,odometer: 310220,cost: 168000,status: 'On Trip' },
-    { reg: 'VH-008', name: 'Fiat Ducato',      type: 'Van',   capacity: 1400, odometer: 77000, cost: 36000, status: 'Available' },
-    { reg: 'VH-009', name: 'Scania R500',      type: 'Truck', capacity: 25000,odometer: 285600,cost: 175000,status: 'Retired' },
-    { reg: 'VH-010', name: 'VW Crafter',       type: 'Van',   capacity: 1700, odometer: 110000,cost: 47000, status: 'In Shop' },
-    { reg: 'VH-011', name: 'DAF XF',           type: 'Truck', capacity: 20000,odometer: 198000,cost: 152000,status: 'Available' },
-    { reg: 'VH-012', name: 'Citroën Jumper',   type: 'Van',   capacity: 1400, odometer: 88900, cost: 39000, status: 'On Trip' },
-    { reg: 'VH-013', name: 'Hyundai H100',     type: 'Van',   capacity: 950,  odometer: 45000, cost: 28000, status: 'Available' },
-    { reg: 'VH-014', name: 'Volvo FL',         type: 'Truck', capacity: 12000,odometer: 142000,cost: 98000, status: 'On Trip' },
-    { reg: 'VH-015', name: 'Mercedes Atego',   type: 'Truck', capacity: 7500, odometer: 132500,cost: 72000, status: 'Available' },
-  ],
-  drivers: [
-    { name: 'Aarav Patel',   license: 'DL-9A12-4421', cat: 'HMV',   expiry: '2027-08-12', contact: '+1 415 555 0142', compl: 96, safety: 92, status: 'On Trip' },
-    { name: 'Mei Singh',     license: 'DL-3B07-1180', cat: 'LMV',   expiry: '2025-12-01', contact: '+1 415 555 0381', compl: 88, safety: 85, status: 'Off Duty' },
-    { name: 'Lola Okonkwo',  license: 'DL-7C19-0098', cat: 'HMV',   expiry: '2024-02-04', contact: '+1 415 555 0920', compl: 72, safety: 78, status: 'Suspended' },
-    { name: 'Sora Tanaka',   license: 'DL-2D24-5511', cat: 'MCWG',  expiry: '2028-04-22', contact: '+1 415 555 0177', compl: 91, safety: 89, status: 'On Trip' },
-    { name: 'Rafael Costa',  license: 'DL-5E05-7702', cat: 'HMV',   expiry: '2026-11-30', contact: '+1 415 555 0421', compl: 82, safety: 88, status: 'Off Duty' },
-    { name: 'Doris Müller',  license: 'DL-8F11-3344', cat: 'LMV',   expiry: '2029-01-15', contact: '+1 415 555 0288', compl: 94, safety: 95, status: 'On Trip' },
-    { name: 'Pelumi Adisa',  license: 'DL-1G22-6655', cat: 'HMV',   expiry: '2027-06-09', contact: '+1 415 555 0119', compl: 87, safety: 90, status: 'Available' },
-    { name: 'Ivo Petrović',  license: 'DL-4H17-2200', cat: 'MCWOG', expiry: '2026-09-19', contact: '+1 415 555 0644', compl: 79, safety: 81, status: 'Available' },
-  ],
-  trips: [
-    { id: 'TR-1042', source: 'Mumbai WH',    dest: 'Pune Depot',     vehicle: 'VH-012', driver: 'Aarav Patel',  weight: 800,  distance: 148, status: 'Dispatched' },
-    { id: 'TR-1041', source: 'Chennai Hub',  dest: 'Bangalore DC',   vehicle: 'VH-007', driver: 'Mei Singh',    weight: 2200, distance: 350, status: 'On Trip' },
-    { id: 'TR-1040', source: 'Delhi North',  dest: 'Jaipur Yard',    vehicle: 'VH-019', driver: 'Lola Okonkwo', weight: 540,  distance: 280, status: 'Completed' },
-    { id: 'TR-1039', source: 'Hyderabad',    dest: 'Vizag Port',     vehicle: 'VH-003', driver: 'Sora Tanaka',  weight: 1900, distance: 620, status: 'Dispatched' },
-    { id: 'TR-1038', source: 'Kolkata WH',   dest: 'Bhubaneswar',    vehicle: 'VH-021', driver: 'Rafael Costa', weight: 700,  distance: 440, status: 'Cancelled' },
-  ],
-  maintenance: [
-    { vehicle: 'VH-004', service: 'Engine overhaul', cost: 4200, date: '2026-07-08', status: 'In Progress' },
-    { vehicle: 'VH-010', service: 'Brake pad replacement', cost: 380, date: '2026-07-05', status: 'Completed' },
-    { vehicle: 'VH-009', service: 'Transmission rebuild', cost: 6800, date: '2026-06-28', status: 'Completed' },
-    { vehicle: 'VH-002', service: 'Oil change + filter', cost: 220, date: '2026-07-10', status: 'Pending' },
-    { vehicle: 'VH-014', service: 'Tire rotation', cost: 160, date: '2026-07-09', status: 'Completed' },
-  ],
-  fuel: [
-    { vehicle: 'VH-001', date: '2026-07-10', liters: 62.4, cost: 92 },
-    { vehicle: 'VH-003', date: '2026-07-10', liters: 118.0,cost: 178 },
-    { vehicle: 'VH-007', date: '2026-07-09', liters: 240.5,cost: 362 },
-    { vehicle: 'VH-012', date: '2026-07-08', liters: 71.2, cost: 107 },
-    { vehicle: 'VH-014', date: '2026-07-08', liters: 195.0,cost: 293 },
-  ],
-  expenses: [
-    { date: '2026-07-10', vehicle: 'VH-001', category: 'Toll',     description: 'I-95 corridor',     amount: 38 },
-    { date: '2026-07-09', vehicle: 'VH-007', category: 'Toll',     description: 'Highway 401',        amount: 92 },
-    { date: '2026-07-08', vehicle: 'VH-012', category: 'Parking',  description: 'Downtown depot',     amount: 24 },
-    { date: '2026-07-07', vehicle: '—',      category: 'Misc',     description: 'Driver allowance',   amount: 150 },
-    { date: '2026-07-05', vehicle: 'VH-014', category: 'Toll',     description: 'Tunnel express',     amount: 18 },
-  ],
-  metrics: {
-    fuelEff: 9.4,
-    utilization: 78,
-    opCost: 184520,
-    roi: 22.6,
-  },
-  monthly: [
-    { m: 'Jan', v: 124 }, { m: 'Feb', v: 142 }, { m: 'Mar', v: 158 },
-    { m: 'Apr', v: 173 }, { m: 'May', v: 165 }, { m: 'Jun', v: 188 },
-    { m: 'Jul', v: 211 },
-  ],
-  costliest: [
-    { reg: 'VH-009', fuel: 4200, maint: 6800, other: 1100 },
-    { reg: 'VH-007', fuel: 3620, maint: 2400, other: 920  },
-    { reg: 'VH-014', fuel: 2100, maint: 1800, other: 600  },
-    { reg: 'VH-002', fuel: 1450, maint: 220  , other: 280  },
-    { reg: 'VH-003', fuel: 1120, maint: 320  , other: 140  },
-  ],
-  rbac: {
-    'Fleet Manager':      { Fleet: 'full', Driver: 'full', Trips: 'full', 'Fuel/Exp': 'full', Analytics: 'full' },
-    'Dispatcher':         { Fleet: 'view', Driver: 'view', Trips: 'full', 'Fuel/Exp': 'view', Analytics: 'view' },
-    'Safety Officer':     { Fleet: 'view', Driver: 'full', Trips: 'view', 'Fuel/Exp': 'none', Analytics: 'view' },
-    'Financial Analyst':  { Fleet: 'view', Driver: 'view', Trips: 'view', 'Fuel/Exp': 'full', Analytics: 'full' },
-  },
+  close() { $('#modal-backdrop').classList.add('hidden'); },
 };
+$('#modal-close').addEventListener('click', modal.close);
+$('#modal-backdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'modal-backdrop') modal.close();
+});
 
-/* ============================================================
-   ROUTER
-   ============================================================ */
-function render() {
+// =================== Router / Renderer =================== //
+async function render() {
   const c = $('#content');
-  const r = {
-    dashboard:   viewDashboard,
-    fleet:       viewFleet,
-    drivers:     viewDrivers,
-    trips:       viewTrips,
-    maintenance: viewMaintenance,
-    fuel:        viewFuel,
-    analytics:   viewAnalytics,
-    settings:    viewSettings,
-  }[APP.page];
-  if (r) r(c);
-}
-
-/* ---------- shared bits ---------- */
-function statusPill(s) {
-  const m = {
-    'Available':'pill-green', 'On Trip':'pill-blue', 'Dispatched':'pill-blue',
-    'In Shop':'pill-amber', 'Suspended':'pill-amber', 'Retired':'pill-red',
-    'Completed':'pill-green','Cancelled':'pill-red', 'Draft':'pill-gray',
-    'Off Duty':'pill-gray',
-    'Pending':'pill-amber', 'In Progress':'pill-amber',
-  };
-  return `<span class="pill ${m[s] || 'pill-gray'}">${esc(s)}</span>`;
-}
-
-/* ============================================================
-   1. DASHBOARD
-   ============================================================ */
-function viewDashboard(c) {
-  const k = DATA.kpis;
-  c.innerHTML = `
-    <div class="kpi-row-7">
-      <div class="kpi b-blue">
-        <div class="kpi-label">Active Vehicles</div>
-        <div class="kpi-value">${k.active}</div>
-        <div class="kpi-foot">in operation</div>
-      </div>
-      <div class="kpi b-green">
-        <div class="kpi-label">Available Vehicles</div>
-        <div class="kpi-value">${k.available}</div>
-        <div class="kpi-foot">ready to dispatch</div>
-      </div>
-      <div class="kpi b-amber">
-        <div class="kpi-label">Vehicles in Maintenance</div>
-        <div class="kpi-value">${k.maint}</div>
-        <div class="kpi-foot">being serviced</div>
-      </div>
-      <div class="kpi b-orange">
-        <div class="kpi-label">Active Trips</div>
-        <div class="kpi-value">${k.activeTrips}</div>
-        <div class="kpi-foot">on the road</div>
-      </div>
-      <div class="kpi b-purple">
-        <div class="kpi-label">Pending Trips</div>
-        <div class="kpi-value">${k.pending}</div>
-        <div class="kpi-foot">awaiting dispatch</div>
-      </div>
-      <div class="kpi b-teal">
-        <div class="kpi-label">Drivers On Duty</div>
-        <div class="kpi-value">${k.driversOnDuty}</div>
-        <div class="kpi-foot">clocked in</div>
-      </div>
-      <div class="kpi b-red">
-        <div class="kpi-label">Fleet Utilization</div>
-        <div class="kpi-value">${k.utilization}%</div>
-        <div class="kpi-foot">last 7 days</div>
-      </div>
-    </div>
-
-    <div class="split-2">
-      <div class="panel">
-        <h2>Recent Trips <span class="h2-sub">last 7 dispatched</span></h2>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Trip ID</th><th>Vehicle</th><th>Driver</th>
-              <th>Status</th><th>ETA</th>
-            </tr></thead>
-            <tbody>
-              ${DATA.recentTrips.map(t => `
-                <tr>
-                  <td><b>${esc(t.id)}</b></td>
-                  <td>${esc(t.vehicle)}</td>
-                  <td>${esc(t.driver)}</td>
-                  <td>${statusPill(t.status)}</td>
-                  <td>${esc(t.eta)}</td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2>Vehicle Status <span class="h2-sub">fleet distribution</span></h2>
-        ${renderStatusBars()}
-      </div>
-    </div>
-  `;
-}
-
-function renderStatusBars() {
-  const s = DATA.statusDistribution;
-  const total = s.total;
-  const segs = [
-    { cls: 's-avail',  label: 'Available',  val: s.Available,  color: '#81B29A' },
-    { cls: 's-trip',   label: 'On Trip',    val: s['On Trip'], color: '#3D5A80' },
-    { cls: 's-shop',   label: 'In Shop',    val: s['In Shop'], color: '#F2A65A' },
-    { cls: 's-susp',   label: 'Suspended',  val: s.Suspended,  color: '#E0A340' },
-    { cls: 's-retire', label: 'Retired',    val: s.Retired,    color: '#E63946' },
-  ];
-  return `
-    <div class="status-bars">
-      ${segs.map(seg => {
-        const pct = (seg.val / total) * 100;
-        return `
-          <div class="sb-row">
-            <div class="sb-label">
-              <span><span class="lg-dot" style="background:${seg.color}"></span> ${seg.label}</span>
-              <b>${seg.val} <span class="muted" style="font-weight:400">(${pct.toFixed(0)}%)</span></b>
-            </div>
-            <div class="sb-track">
-              <div class="sb-seg ${seg.cls}" style="width:${pct.toFixed(1)}%"></div>
-            </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-    <div class="sb-legend">
-      <div class="lg"><span class="lg-dot" style="background:#81B29A"></span> Available</div>
-      <div class="lg"><span class="lg-dot" style="background:#3D5A80"></span> On Trip</div>
-      <div class="lg"><span class="lg-dot" style="background:#F2A65A"></span> In Shop</div>
-      <div class="lg"><span class="lg-dot" style="background:#E0A340"></span> Suspended</div>
-      <div class="lg"><span class="lg-dot" style="background:#E63946"></span> Retired</div>
-    </div>
-  `;
-}
-
-/* ============================================================
-   2. FLEET REGISTRY
-   ============================================================ */
-function viewFleet(c) {
-  const types = ['All', ...new Set(DATA.vehicles.map(v => v.type))];
-  const statuses = ['All', 'Available', 'On Trip', 'In Shop', 'Suspended', 'Retired'];
-
-  c.innerHTML = `
-    <div class="panel">
-      <div class="controls-row">
-        <select id="f-type">
-          ${types.map(t => `<option>${esc(t)}</option>`).join('')}
-        </select>
-        <select id="f-status">
-          ${statuses.map(s => `<option>${esc(s)}</option>`).join('')}
-        </select>
-        <input type="search" id="f-search" placeholder="Search reg. no, name, model…" />
-        <button class="btn-orange" id="add-vehicle">+ Add Vehicle</button>
-      </div>
-      <div class="table-wrap">
-        <table id="v-table">
-          <thead><tr>
-            <th>Reg. No</th><th>Name / Model</th><th>Type</th>
-            <th>Capacity</th><th>Odometer</th><th>Acq. Cost</th><th>Status</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  `;
-  drawFleet(DATA.vehicles);
-  $('#f-type').addEventListener('change', applyFilter);
-  $('#f-status').addEventListener('change', applyFilter);
-  $('#f-search').addEventListener('input', applyFilter);
-  $('#add-vehicle').addEventListener('click', () => alert('Add Vehicle modal — wire to your backend'));
-
-  function applyFilter() {
-    const t = $('#f-type').value;
-    const s = $('#f-status').value;
-    const q = $('#f-search').value.toLowerCase().trim();
-    drawFleet(DATA.vehicles.filter(v =>
-      (t === 'All' || v.type === t) &&
-      (s === 'All' || v.status === s) &&
-      (!q || v.reg.toLowerCase().includes(q) || v.name.toLowerCase().includes(q))
-    ));
-  }
-  function drawFleet(list) {
-    const tb = $('#v-table tbody');
-    if (!list.length) { tb.innerHTML = `<tr><td colspan="7" class="no-data">No vehicles match.</td></tr>`; return; }
-    tb.innerHTML = list.map(v => `
-      <tr>
-        <td><b>${esc(v.reg)}</b></td>
-        <td>${esc(v.name)}</td>
-        <td>${esc(v.type)}</td>
-        <td>${v.capacity.toLocaleString()} kg</td>
-        <td>${v.odometer.toLocaleString()} km</td>
-        <td>${fmt$(v.cost)}</td>
-        <td>${statusPill(v.status)}</td>
-      </tr>
-    `).join('');
-  }
-}
-
-/* ============================================================
-   3. DRIVER MANAGEMENT
-   ============================================================ */
-function viewDrivers(c) {
-  c.innerHTML = `
-    <div class="panel">
-      <div class="table-wrap">
-        <table id="d-table">
-          <thead><tr>
-            <th>Driver Name</th><th>License No</th><th>Category</th>
-            <th>Expiry Date</th><th>Contact</th><th>Trip Compl %</th>
-            <th>Safety Score</th><th>Status</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
-      <div class="toggle-bar">
-        <div class="toggle-block tb-on" data-status="Available">
-          <div class="toggle-swatch"></div>
-          <div class="toggle-label"><b>${DATA.drivers.filter(d=>d.status==='Available').length}</b> Available</div>
-        </div>
-        <div class="toggle-block tb-trip" data-status="On Trip">
-          <div class="toggle-swatch"></div>
-          <div class="toggle-label"><b>${DATA.drivers.filter(d=>d.status==='On Trip').length}</b> On Trip</div>
-        </div>
-        <div class="toggle-block tb-off" data-status="Off Duty">
-          <div class="toggle-swatch"></div>
-          <div class="toggle-label"><b>${DATA.drivers.filter(d=>d.status==='Off Duty').length}</b> Off Duty</div>
-        </div>
-        <div class="toggle-block tb-susp" data-status="Suspended">
-          <div class="toggle-swatch"></div>
-          <div class="toggle-label"><b>${DATA.drivers.filter(d=>d.status==='Suspended').length}</b> Suspended</div>
-        </div>
-      </div>
-    </div>
-  `;
-  const tb = $('#d-table tbody');
-  tb.innerHTML = DATA.drivers.map(d => {
-    const expired = new Date(d.expiry) < new Date();
-    return `
-      <tr>
-        <td><b>${esc(d.name)}</b></td>
-        <td>${esc(d.license)}</td>
-        <td>${esc(d.cat)}</td>
-        <td>${esc(d.expiry)} ${expired ? '<span class="expired-warn">EXPIRED</span>' : ''}</td>
-        <td>${esc(d.contact)}</td>
-        <td>${d.compl}%</td>
-        <td>${d.safety}</td>
-        <td>${statusPill(d.status)}</td>
-      </tr>
-    `;
-  }).join('');
-
-  // Toggle filter interaction
-  let active = null;
-  $$('.toggle-block').forEach(b => b.addEventListener('click', () => {
-    if (active === b.dataset.status) {
-      b.classList.remove('active');
-      active = null;
-      tb.querySelectorAll('tr').forEach(r => r.style.display = '');
-    } else {
-      $$('.toggle-block').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      active = b.dataset.status;
-      tb.querySelectorAll('tr').forEach(r => {
-        const s = r.querySelector('.pill')?.textContent.trim();
-        r.style.display = (s === active) ? '' : 'none';
-      });
+  c.innerHTML = '<p class="text-soft">Loading…</p>';
+  try {
+    switch (state.page) {
+      case 'dashboard':     await renderDashboard(c); break;
+      case 'vehicles':      await renderVehicles(c); break;
+      case 'drivers':       await renderDrivers(c); break;
+      case 'trips':         await renderTrips(c); break;
+      case 'maintenance':   await renderMaintenance(c); break;
+      case 'fuel':          await renderFuel(c); break;
+      case 'reports':       await renderReports(c); break;
+      case 'notifications': await renderNotifications(c); break;
+      case 'users':         await renderUsers(c); break;
     }
+    updateNotifBadge();
+  } catch (e) {
+    c.innerHTML = `<div class="card"><h3>⚠️ Error</h3><p>${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+// =================== Notifications badge =================== //
+async function updateNotifBadge() {
+  try {
+    const list = await api('/notifications');
+    const unread = list.filter(n => !n.read).length;
+    const badge = $('#notif-count');
+    badge.textContent = unread;
+    badge.classList.toggle('hidden', unread === 0);
+  } catch {}
+}
+$('#notif-bell').addEventListener('click', () => navigate('notifications'));
+
+// =================== Dashboard =================== //
+async function renderDashboard(c) {
+  const [kpis, vehicles] = await Promise.all([api('/kpis'), api('/vehicles')]);
+  c.innerHTML = `
+    <div class="card">
+      <div class="row">
+        <div><label>Vehicle Type</label>
+          <select id="f-type"><option value="">All</option>
+            <option>Van</option><option>Truck</option><option>Car</option><option>Bus</option>
+          </select></div>
+        <div><label>Status</label>
+          <select id="f-status"><option value="">All</option>
+            <option>Available</option><option>On Trip</option><option>In Shop</option><option>Retired</option>
+          </select></div>
+        <div><label>Region</label>
+          <select id="f-region"><option value="">All</option>
+            <option>Central</option><option>North</option><option>South</option><option>West</option><option>East</option>
+          </select></div>
+        <div style="display:flex;align-items:flex-end;">
+          <button class="btn" id="clear-filters">Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi accent"><span class="label">🚐 Active Vehicles</span><span class="value">${kpis.active_vehicles}</span></div>
+      <div class="kpi"><span class="label">✅ Available</span><span class="value">${kpis.available_vehicles}</span></div>
+      <div class="kpi"><span class="label">🛠️ In Shop</span><span class="value">${kpis.in_shop}</span></div>
+      <div class="kpi accent"><span class="label">📈 Fleet Utilization</span><span class="value">${kpis.fleet_utilization}%</span></div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi"><span class="label">📦 Active Trips</span><span class="value">${kpis.active_trips}</span></div>
+      <div class="kpi"><span class="label">📝 Pending Trips</span><span class="value">${kpis.pending_trips}</span></div>
+      <div class="kpi"><span class="label">👤 Drivers On Duty</span><span class="value">${kpis.drivers_on_duty}</span></div>
+      <div class="kpi"><span class="label">🚚 Total Fleet</span><span class="value">${kpis.total_vehicles}</span></div>
+    </div>
+
+    <div class="card">
+      <h3>🚐 Fleet Snapshot</h3>
+      <div class="table-wrap"><table id="v-table">
+        <thead><tr>
+          <th>Reg</th><th>Name</th><th>Type</th><th>Max Load</th><th>Odometer</th><th>Cost</th><th>Region</th><th>Status</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h3>📊 Status Distribution</h3>
+      <div class="donut" id="donut"></div>
+    </div>
+  `;
+
+  const tableBody = $('#v-table tbody', c);
+  function drawVTable(list) {
+    if (!list.length) {
+      tableBody.innerHTML = `<tr><td colspan="8" class="text-soft">No vehicles match.</td></tr>`;
+      return;
+    }
+    tableBody.innerHTML = list.map(v => `
+      <tr>
+        <td><b>${escapeHtml(v.reg_no)}</b></td>
+        <td>${escapeHtml(v.name)}</td>
+        <td>${escapeHtml(v.type)}</td>
+        <td>${fmtKm(v.max_load_kg)} kg</td>
+        <td>${fmtKm(v.odometer_km)} km</td>
+        <td>${fmtINR(v.acquisition_cost)}</td>
+        <td>${escapeHtml(v.region)}</td>
+        <td>${statusPill(v.status)}</td>
+      </tr>`).join('');
+  }
+  drawVTable(vehicles);
+  drawDonut(vehicles);
+
+  const filters = { type: $('#f-type', c), status: $('#f-status', c), region: $('#f-region', c) };
+  Object.values(filters).forEach(sel => sel.addEventListener('change', async () => {
+    const params = new URLSearchParams();
+    if (filters.type.value) params.set('type', filters.type.value);
+    if (filters.status.value) params.set('status', filters.status.value);
+    if (filters.region.value) params.set('region', filters.region.value);
+    const list = await api('/vehicles?' + params.toString());
+    drawVTable(list);
+    drawDonut(list);
+  }));
+  $('#clear-filters', c).addEventListener('click', () => {
+    filters.type.value = ''; filters.status.value = ''; filters.region.value = '';
+    drawVTable(vehicles); drawDonut(vehicles);
+  });
+}
+
+function statusPill(status) {
+  const cls = { 'Available':'pill-green','On Trip':'pill-blue','In Shop':'pill-amber',
+                'Retired':'pill-gray','Off Duty':'pill-gray','Suspended':'pill-red',
+                'Draft':'pill-gray','Dispatched':'pill-blue','Completed':'pill-green','Cancelled':'pill-red' }[status] || 'pill-gray';
+  return `<span class="pill ${cls}">${escapeHtml(status)}</span>`;
+}
+
+function drawDonut(vehicles) {
+  const counts = {};
+  for (const v of vehicles) counts[v.status] = (counts[v.status] || 0) + 1;
+  const entries = Object.entries(counts);
+  const total = entries.reduce((s, [, n]) => s + n, 0) || 1;
+  const colors = { 'Available':'#16a34a','On Trip':'#2563eb','In Shop':'#f59e0b','Retired':'#94a3b8' };
+  const r = 60, c = 80;
+  let offset = 0;
+  const segments = entries.map(([s, n]) => {
+    const frac = n / total;
+    const dash = `${(frac * 2 * Math.PI * r).toFixed(2)} ${(2 * Math.PI * r).toFixed(2)}`;
+    const seg = `<circle cx="${c}" cy="${c}" r="${r}" fill="none"
+                  stroke="${colors[s] || '#6366f1'}" stroke-width="20"
+                  stroke-dasharray="${dash}" stroke-dashoffset="${-offset}"
+                  transform="rotate(-90 ${c} ${c})"/>`;
+    offset += frac * 2 * Math.PI * r;
+    return seg;
+  }).join('');
+  $('#donut').innerHTML = `
+    <svg class="donut-svg" viewBox="0 0 160 160">
+      <circle cx="80" cy="80" r="60" fill="none" stroke="var(--border)" stroke-width="20"/>
+      ${segments}
+      <text x="80" y="86" text-anchor="middle" font-size="22" font-weight="700"
+            fill="var(--text)">${total}</text>
+    </svg>
+    <div class="donut-legend">
+      ${entries.map(([s, n]) => `
+        <div class="lg"><span class="lg-dot" style="background:${colors[s] || '#6366f1'}"></span>
+        <span>${escapeHtml(s)} — <b>${n}</b></span></div>`).join('')}
+    </div>
+  `;
+}
+
+// =================== Vehicles =================== //
+async function renderVehicles(c) {
+  const vehicles = await api('/vehicles');
+  c.innerHTML = `
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>🚐 Vehicle Registry</h3>
+        <button class="btn btn-primary" id="add-v">+ Add Vehicle</button>
+      </div>
+      <div class="table-wrap"><table id="v-list">
+        <thead><tr>
+          <th>Reg</th><th>Name</th><th>Type</th><th>Max Load</th><th>Odometer</th>
+          <th>Cost</th><th>Region</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  `;
+  const tbody = $('#v-list tbody', c);
+  function draw(list) {
+    if (!list.length) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-soft">No vehicles.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = list.map(v => `
+      <tr>
+        <td><b>${escapeHtml(v.reg_no)}</b></td>
+        <td>${escapeHtml(v.name)}</td>
+        <td>${escapeHtml(v.type)}</td>
+        <td>${fmtKm(v.max_load_kg)} kg</td>
+        <td>${fmtKm(v.odometer_km)} km</td>
+        <td>${fmtINR(v.acquisition_cost)}</td>
+        <td>${escapeHtml(v.region)}</td>
+        <td>${statusPill(v.status)}</td>
+        <td class="actions">
+          <button class="btn btn-sm" data-edit="${v.id}">Edit</button>
+          <button class="btn btn-sm btn-danger" data-del="${v.id}">Delete</button>
+        </td>
+      </tr>`).join('');
+  }
+  draw(vehicles);
+  tbody.addEventListener('click', async (e) => {
+    const editId = e.target.dataset.edit;
+    const delId = e.target.dataset.del;
+    if (editId) openVehicleForm(vehicles.find(v => v.id === +editId), async () => {
+      const list = await api('/vehicles'); draw(list);
+    });
+    if (delId) {
+      if (confirm('Delete this vehicle?')) {
+        try { await api(`/vehicles/${delId}`, { method: 'DELETE' }); toast('Deleted'); renderVehicles(c); }
+        catch (err) { toast(err.message, 'error'); }
+      }
+    }
+  });
+  $('#add-v', c).addEventListener('click', () => openVehicleForm(null, async () => {
+    const list = await api('/vehicles'); draw(list);
   }));
 }
 
-/* ============================================================
-   4. TRIP DISPATCHER
-   ============================================================ */
-function viewTrips(c) {
-  // pre-selected vehicle determines capacity (data attribute on <option>)
+function openVehicleForm(v, onSaved) {
+  const isEdit = !!v;
+  modal.open(isEdit ? 'Edit Vehicle' : 'Add Vehicle', `
+    <div class="form-row"><label>Registration Number*</label>
+      <input id="f-reg" value="${escapeHtml(v?.reg_no || '')}" ${isEdit ? 'disabled' : ''}/></div>
+    <div class="form-row"><label>Name / Model*</label>
+      <input id="f-name" value="${escapeHtml(v?.name || '')}"/></div>
+    <div class="form-row"><label>Type*</label>
+      <select id="f-type">
+        ${['Van','Truck','Car','Bus'].map(t =>
+          `<option ${v?.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+      </select></div>
+    <div class="form-row"><label>Max Load (kg)*</label>
+      <input id="f-cap" type="number" min="0" step="0.1" value="${v?.max_load_kg ?? 500}"/></div>
+    <div class="form-row"><label>Odometer (km)</label>
+      <input id="f-odo" type="number" min="0" value="${v?.odometer_km ?? 0}"/></div>
+    <div class="form-row"><label>Acquisition Cost (₹)</label>
+      <input id="f-cost" type="number" min="0" value="${v?.acquisition_cost ?? 0}"/></div>
+    <div class="form-row"><label>Region</label>
+      <select id="f-region">
+        ${['Central','North','South','West','East'].map(r =>
+          `<option ${v?.region === r ? 'selected' : ''}>${r}</option>`).join('')}
+      </select></div>
+    ${isEdit ? `<div class="form-row"><label>Status</label>
+      <select id="f-status">
+        ${['Available','On Trip','In Shop','Retired'].map(s =>
+          `<option ${v.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+      </select></div>` : ''}
+    <div class="modal-actions">
+      <button class="btn" data-modal-cancel>Cancel</button>
+      <button class="btn btn-primary" id="save-v">${isEdit ? 'Save' : 'Register'}</button>
+    </div>
+  `, (root) => {
+    $('[data-modal-cancel]', root).addEventListener('click', modal.close);
+    $('#save-v', root).addEventListener('click', async () => {
+      const body = {
+        reg_no: $('#f-reg', root).value,
+        name: $('#f-name', root).value,
+        type: $('#f-type', root).value,
+        max_load_kg: +$('#f-cap', root).value,
+        odometer_km: +$('#f-odo', root).value,
+        acquisition_cost: +$('#f-cost', root).value,
+        region: $('#f-region', root).value,
+      };
+      if (isEdit) body.status = $('#f-status', root).value;
+      try {
+        if (isEdit) await api(`/vehicles/${v.id}`, { method: 'PUT', body });
+        else await api('/vehicles', { method: 'POST', body });
+        toast(isEdit ? 'Updated' : 'Vehicle registered');
+        modal.close();
+        onSaved();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+}
+
+// =================== Drivers =================== //
+async function renderDrivers(c) {
+  const drivers = await api('/drivers');
   c.innerHTML = `
-    <div class="split-unequal">
-      <div class="panel">
-        <h2>Create Trip</h2>
-        <form class="form-stack" id="trip-form">
-          <label><span>Source</span><input type="text" id="t-src" placeholder="Mumbai Warehouse" required /></label>
-          <label><span>Destination</span><input type="text" id="t-dst" placeholder="Pune Depot" required /></label>
-          <label><span>Vehicle</span>
-            <select id="t-veh" required>
-              <option value="">— select vehicle —</option>
-              ${DATA.vehicles.filter(v=>v.status==='Available').map(v =>
-                `<option value="${v.reg}" data-cap="${v.capacity}">${esc(v.reg)} · ${esc(v.name)} (${v.capacity} kg)</option>`).join('')}
-            </select>
-          </label>
-          <label><span>Driver</span>
-            <select id="t-drv" required>
-              <option value="">— select driver —</option>
-              ${DATA.drivers.filter(d=>['Available','Off Duty'].includes(d.status)).map(d =>
-                `<option>${esc(d.name)}</option>`).join('')}
-            </select>
-          </label>
-          <label><span>Cargo Weight (KG)</span><input type="number" id="t-wt" min="0" value="0" required /></label>
-
-          <div id="cap-alert" class="alert-red hidden">
-            <span class="alert-icon">⚠️</span>
-            <div><b>Capacity exceeded by <span id="cap-excess">0</span> kg</b> — dispatch blocked.</div>
-          </div>
-
-          <label><span>Planned Distance (KM)</span><input type="number" id="t-dist" min="0" value="100" required /></label>
-          <button type="submit" class="btn-primary-orange" id="t-submit">Dispatch</button>
-        </form>
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>👤 Driver Management</h3>
+        <button class="btn btn-primary" id="add-d">+ Add Driver</button>
       </div>
-
-      <div class="live-board">
-        <h3>Live Board <span class="h2-sub">active trips</span></h3>
-        <div class="stepper-list">
-          ${renderStepper()}
-        </div>
-      </div>
+      <div class="table-wrap"><table id="d-list">
+        <thead><tr>
+          <th>Name</th><th>Contact</th><th>License</th><th>Category</th>
+          <th>Expiry</th><th>Safety</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
     </div>
   `;
-
-  // Capacity logic
-  const vehSel = $('#t-veh'), wtIn = $('#t-wt'), alert = $('#cap-alert'),
-        excessEl = $('#cap-excess'), submit = $('#t-submit');
-  function evaluate() {
-    const opt = vehSel.options[vehSel.selectedIndex];
-    const cap = opt ? parseInt(opt.dataset.cap || 0, 10) : 0;
-    const wt  = parseInt(wtIn.value || 0, 10);
-    const over = wt - cap;
-    if (cap > 0 && over > 0) {
-      alert.classList.remove('hidden');
-      excessEl.textContent = over;
-      submit.classList.add('btn-disabled');
-      submit.setAttribute('disabled', 'disabled');
-      submit.textContent = 'Dispatch (blocked)';
-    } else {
-      alert.classList.add('hidden');
-      submit.classList.remove('btn-disabled');
-      submit.removeAttribute('disabled');
-      submit.textContent = 'Dispatch';
-    }
+  const tbody = $('#d-list tbody', c);
+  function expPill(expiry) {
+    const d = (new Date(expiry) - new Date()) / (1000 * 3600 * 24);
+    if (d < 0) return `<span class="pill pill-red">Expired ${Math.abs(Math.floor(d))}d ago</span>`;
+    if (d <= 30) return `<span class="pill pill-amber">Expires in ${Math.floor(d)}d</span>`;
+    return `<span class="pill pill-green">Valid (${Math.floor(d)}d)</span>`;
   }
-  vehSel.addEventListener('change', evaluate);
-  wtIn.addEventListener('input', evaluate);
+  function draw(list) {
+    if (!list.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-soft">No drivers.</td></tr>`; return;
+    }
+    tbody.innerHTML = list.map(d => `
+      <tr>
+        <td><b>${escapeHtml(d.name)}</b></td>
+        <td>${escapeHtml(d.contact)}</td>
+        <td>${escapeHtml(d.license_no)}</td>
+        <td>${escapeHtml(d.license_category)}</td>
+        <td>${escapeHtml(d.license_expiry)} ${expPill(d.license_expiry)}</td>
+        <td>⭐ ${d.safety_score}</td>
+        <td>${statusPill(d.status)}</td>
+        <td class="actions">
+          <button class="btn btn-sm" data-edit="${d.id}">Edit</button>
+          <button class="btn btn-sm btn-danger" data-del="${d.id}">Delete</button>
+        </td>
+      </tr>`).join('');
+  }
+  draw(drivers);
+  tbody.addEventListener('click', async (e) => {
+    const editId = e.target.dataset.edit;
+    const delId = e.target.dataset.del;
+    if (editId) openDriverForm(drivers.find(d => d.id === +editId), async () => {
+      const list = await api('/drivers'); draw(list);
+    });
+    if (delId) {
+      if (confirm('Delete this driver?')) {
+        try { await api(`/drivers/${delId}`, { method: 'DELETE' }); toast('Deleted'); renderDrivers(c); }
+        catch (err) { toast(err.message, 'error'); }
+      }
+    }
+  });
+  $('#add-d', c).addEventListener('click', () => openDriverForm(null, async () => {
+    const list = await api('/drivers'); draw(list);
+  }));
+}
 
-  $('#trip-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (submit.hasAttribute('disabled')) return;
-    alert('Trip dispatched! (demo)');
+function openDriverForm(d, onSaved) {
+  const isEdit = !!d;
+  modal.open(isEdit ? 'Edit Driver' : 'Add Driver', `
+    <div class="form-row"><label>Name*</label>
+      <input id="f-name" value="${escapeHtml(d?.name || '')}"/></div>
+    <div class="form-row"><label>License Number*</label>
+      <input id="f-lic" value="${escapeHtml(d?.license_no || '')}" ${isEdit ? 'disabled' : ''}/></div>
+    <div class="form-row"><label>Category*</label>
+      <select id="f-cat">
+        ${['LMV','HMV','MCWG','MCWOG'].map(c =>
+          `<option ${d?.license_category === c ? 'selected' : ''}>${c}</option>`).join('')}
+      </select></div>
+    <div class="form-row"><label>License Expiry*</label>
+      <input id="f-exp" type="date" value="${escapeHtml(d?.license_expiry || '')}"/></div>
+    <div class="form-row"><label>Contact*</label>
+      <input id="f-contact" value="${escapeHtml(d?.contact || '')}"/></div>
+    <div class="form-row"><label>Safety Score</label>
+      <input id="f-score" type="number" min="0" max="100" step="0.1" value="${d?.safety_score ?? 80}"/></div>
+    ${isEdit ? `<div class="form-row"><label>Status</label>
+      <select id="f-status">
+        ${['Available','On Trip','Off Duty','Suspended'].map(s =>
+          `<option ${d.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+      </select></div>` : ''}
+    <div class="modal-actions">
+      <button class="btn" data-modal-cancel>Cancel</button>
+      <button class="btn btn-primary" id="save-d">${isEdit ? 'Save' : 'Register'}</button>
+    </div>
+  `, (root) => {
+    $('[data-modal-cancel]', root).addEventListener('click', modal.close);
+    $('#save-d', root).addEventListener('click', async () => {
+      const body = {
+        name: $('#f-name', root).value,
+        license_no: $('#f-lic', root).value,
+        license_category: $('#f-cat', root).value,
+        license_expiry: $('#f-exp', root).value,
+        contact: $('#f-contact', root).value,
+        safety_score: +$('#f-score', root).value,
+      };
+      if (isEdit) body.status = $('#f-status', root).value;
+      try {
+        if (isEdit) await api(`/drivers/${d.id}`, { method: 'PUT', body });
+        else await api('/drivers', { method: 'POST', body });
+        toast(isEdit ? 'Updated' : 'Driver registered');
+        modal.close();
+        onSaved();
+      } catch (err) { toast(err.message, 'error'); }
+    });
   });
 }
 
-function renderStepper() {
-  // Render a single "active" stepper that shows lifecycle nodes
-  const stages = [
-    { key: 'draft',      label: 'Draft',      meta: 'Trip created · awaiting dispatch' },
-    { key: 'dispatched', label: 'Dispatched', meta: 'Assigned to vehicle & driver' },
-    { key: 'completed',  label: 'Completed',  meta: 'Cargo delivered' },
-    { key: 'cancelled',  label: 'Cancelled',  meta: 'Trip terminated' },
-  ];
-  return stages.map((s, i) => {
-    const cls = i < 2 ? 'done' : (i === 2 ? 'active' : '');
-    const icon = { draft:'📝', dispatched:'🚚', completed:'✅', cancelled:'✖' }[s.key];
-    return `
-      <div class="step ${cls}">
-        <div class="step-node">${icon}</div>
-        <div class="step-body">
-          <div class="step-title">${s.label}</div>
-          <div class="step-meta">${s.meta}</div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-/* ============================================================
-   5. MAINTENANCE
-   ============================================================ */
-function viewMaintenance(c) {
+// =================== Trips =================== //
+async function renderTrips(c) {
+  const [trips, vehicles, drivers] = await Promise.all([
+    api('/trips'), api('/vehicles'), api('/drivers'),
+  ]);
   c.innerHTML = `
-    <div class="maint-grid">
-      <div class="panel">
-        <h2>Log Service Record</h2>
-        <form class="form-stack" id="m-form">
-          <label><span>Vehicle</span>
-            <select required>
-              <option value="">— select —</option>
-              ${DATA.vehicles.map(v => `<option>${esc(v.reg)} · ${esc(v.name)}</option>`).join('')}
-            </select>
-          </label>
-          <label><span>Service Type</span>
-            <select required>
-              <option>Oil change</option>
-              <option>Tire rotation</option>
-              <option>Brake service</option>
-              <option>Engine overhaul</option>
-              <option>Transmission</option>
-              <option>Inspection</option>
-            </select>
-          </label>
-          <label><span>Cost</span><input type="number" min="0" placeholder="0.00" required /></label>
-          <label><span>Date</span><input type="date" value="${new Date().toISOString().slice(0,10)}" required /></label>
-          <label><span>Status</span>
-            <select required>
-              <option>Pending</option>
-              <option>In Progress</option>
-              <option>Completed</option>
-            </select>
-          </label>
-          <button type="submit" class="btn-primary-orange">Save</button>
-        </form>
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>📦 Trips</h3>
+        <button class="btn btn-primary" id="add-t">+ Create Trip</button>
       </div>
-
-      <div class="panel">
-        <h2>Service Log <span class="h2-sub">${DATA.maintenance.length} records</span></h2>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Vehicle</th><th>Service</th><th>Cost</th>
-              <th>Date</th><th>Status</th>
-            </tr></thead>
-            <tbody>
-              ${DATA.maintenance.map(m => `
-                <tr>
-                  <td><b>${esc(m.vehicle)}</b></td>
-                  <td>${esc(m.service)}</td>
-                  <td>${fmt$(m.cost)}</td>
-                  <td>${esc(m.date)}</td>
-                  <td>${statusPill(m.status)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <div class="table-wrap"><table id="t-list">
+        <thead><tr>
+          <th>#</th><th>Route</th><th>Vehicle</th><th>Driver</th>
+          <th>Cargo / Dist</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
     </div>
   `;
-  $('#m-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    alert('Service record saved (demo).');
+  const tbody = $('#t-list tbody', c);
+  function draw(list) {
+    if (!list.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-soft">No trips yet.</td></tr>`; return;
+    }
+    tbody.innerHTML = list.map(t => `
+      <tr>
+        <td>#${t.id}</td>
+        <td>${escapeHtml(t.source)} → ${escapeHtml(t.destination)}</td>
+        <td>${escapeHtml(t.vehicle_reg)}</td>
+        <td>${escapeHtml(t.driver_name)}</td>
+        <td>${t.cargo_kg} kg<br><span class="text-soft">${t.planned_distance_km} km planned</span></td>
+        <td>${statusPill(t.status)}</td>
+        <td class="actions">
+          ${t.status === 'Draft' ? `<button class="btn btn-sm btn-primary" data-disp="${t.id}">Dispatch</button>` : ''}
+          ${t.status === 'Dispatched' ? `<button class="btn btn-sm btn-success" data-comp="${t.id}">Complete</button>` : ''}
+          ${(t.status === 'Draft' || t.status === 'Dispatched') ?
+              `<button class="btn btn-sm btn-danger" data-cancel="${t.id}">Cancel</button>` : ''}
+        </td>
+      </tr>`).join('');
+  }
+  draw(trips);
+
+  tbody.addEventListener('click', async (e) => {
+    const dispId = e.target.dataset.disp;
+    const compId = e.target.dataset.comp;
+    const canId = e.target.dataset.cancel;
+    if (dispId) {
+      try { const r = await api(`/trips/${dispId}/dispatch`, { method: 'POST' }); toast(r.message); renderTrips(c); }
+      catch (err) { toast(err.message, 'error'); }
+    }
+    if (compId) openCompleteForm(+compId, c);
+    if (canId) {
+      if (!confirm('Cancel this trip?')) return;
+      try { const r = await api(`/trips/${canId}/cancel`, { method: 'POST' }); toast(r.message); renderTrips(c); }
+      catch (err) { toast(err.message, 'error'); }
+    }
+  });
+
+  $('#add-t', c).addEventListener('click', () => openTripForm(vehicles, drivers, async () => {
+    renderTrips(c);
+  }));
+}
+
+function openTripForm(vehicles, drivers, onCreated) {
+  // Filter only assignable vehicles & drivers per business rules
+  const avVs = vehicles.filter(v => v.status === 'Available');
+  const elDs = drivers.filter(d => {
+    if (d.status === 'On Trip' || d.status === 'Suspended') return false;
+    return new Date(d.license_expiry) >= new Date();
+  });
+
+  if (!avVs.length) { toast('No available vehicles to dispatch', 'error'); return; }
+  if (!elDs.length) { toast('No eligible drivers (check license expiry / status)', 'error'); return; }
+
+  modal.open('Create Trip (Draft)', `
+    <div class="form-row"><label>Source*</label><input id="f-src" placeholder="Mumbai Warehouse"/></div>
+    <div class="form-row"><label>Destination*</label><input id="f-dst" placeholder="Pune Depot"/></div>
+    <div class="form-row"><label>Vehicle (Available only)*</label>
+      <select id="f-v">${avVs.map(v =>
+        `<option value="${v.id}">${escapeHtml(v.reg_no)} — ${escapeHtml(v.name)} (max ${v.max_load_kg} kg)</option>`).join('')}</select></div>
+    <div class="form-row"><label>Driver (eligible only)*</label>
+      <select id="f-d">${elDs.map(d =>
+        `<option value="${d.id}">${escapeHtml(d.name)} — ${escapeHtml(d.license_no)}</option>`).join('')}</select></div>
+    <div class="form-row"><label>Cargo Weight (kg)*</label><input id="f-cargo" type="number" min="0" value="100"/></div>
+    <div class="form-row"><label>Planned Distance (km)*</label><input id="f-dist" type="number" min="0" value="100"/></div>
+    <div class="modal-actions">
+      <button class="btn" data-modal-cancel>Cancel</button>
+      <button class="btn btn-primary" id="save-t">Create Trip</button>
+    </div>
+  `, (root) => {
+    $('[data-modal-cancel]', root).addEventListener('click', modal.close);
+    $('#save-t', root).addEventListener('click', async () => {
+      try {
+        const r = await api('/trips', { method: 'POST', body: {
+          source: $('#f-src', root).value,
+          destination: $('#f-dst', root).value,
+          vehicle_id: +$('#f-v', root).value,
+          driver_id: +$('#f-d', root).value,
+          cargo_kg: +$('#f-cargo', root).value,
+          planned_distance_km: +$('#f-dist', root).value,
+        }});
+        toast(r.message);
+        modal.close();
+        onCreated();
+      } catch (err) { toast(err.message, 'error'); }
+    });
   });
 }
 
-/* ============================================================
-   6. FUEL & EXPENSES
-   ============================================================ */
-function viewFuel(c) {
-  const fuelTotal = DATA.fuel.reduce((s, f) => s + f.cost, 0);
-  const expTotal  = DATA.expenses.reduce((s, e) => s + e.amount, 0);
-  const maintTotal = DATA.maintenance.reduce((s, m) => s + m.cost, 0);
-  const total = fuelTotal + maintTotal + expTotal;
-
-  c.innerHTML = `
-    <div class="fuel-section">
-      <div class="panel">
-        <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0">Fuel Logs</h3>
-          <div class="fuel-top-actions">
-            <button class="btn-orange">+ Log Fuel</button>
-            <button class="btn-orange">+ Add Expense</button>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Vehicle</th><th>Date</th><th>Liters</th><th>Fuel Cost</th>
-            </tr></thead>
-            <tbody>
-              ${DATA.fuel.map(f => `
-                <tr>
-                  <td><b>${esc(f.vehicle)}</b></td>
-                  <td>${esc(f.date)}</td>
-                  <td>${f.liters.toFixed(1)} L</td>
-                  <td>${fmt$(f.cost)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
+function openCompleteForm(tripId, c) {
+  modal.open('Complete Trip', `
+    <div class="form-row"><label>Final Odometer (km)*</label><input id="f-odo" type="number" min="0" value="0"/></div>
+    <div class="form-row"><label>Fuel Used (liters)*</label><input id="f-fuel" type="number" min="0" step="0.1" value="10"/></div>
+    <div class="form-row"><label>Revenue (₹)</label><input id="f-rev" type="number" min="0" value="0"/></div>
+    <div class="modal-actions">
+      <button class="btn" data-modal-cancel>Cancel</button>
+      <button class="btn btn-success" id="save-c">Complete</button>
     </div>
-
-    <div class="fuel-section">
-      <div class="panel">
-        <h3>Other Expenses (Toll / Misc)</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Date</th><th>Vehicle</th><th>Category</th><th>Description</th><th>Amount</th>
-            </tr></thead>
-            <tbody>
-              ${DATA.expenses.map(x => `
-                <tr>
-                  <td>${esc(x.date)}</td>
-                  <td>${esc(x.vehicle)}</td>
-                  <td>${esc(x.category)}</td>
-                  <td>${esc(x.description)}</td>
-                  <td>${fmt$(x.amount)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div class="summary-line">
-      <div>
-        <div class="summary-label">Total Operational Cost (auto)</div>
-        <div class="muted" style="font-size:11px; font-weight:400; margin-top:2px;">
-          FUEL ${fmt$(fuelTotal)} + MAINT ${fmt$(maintTotal)} + EXP ${fmt$(expTotal)}
-        </div>
-      </div>
-      <div class="summary-value">${fmt$(total)}</div>
-    </div>
-  `;
-}
-
-/* ============================================================
-   7. REPORTS & ANALYTICS
-   ============================================================ */
-function viewAnalytics(c) {
-  const M = DATA.metrics;
-  const maxV = Math.max(...DATA.monthly.map(m => m.v));
-  const maxCost = Math.max(...DATA.costliest.map(c => c.fuel + c.maint + c.other));
-
-  c.innerHTML = `
-    <div class="metrics-row-4">
-      <div class="metric-card m-green">
-        <div class="mc-label">Fuel Efficiency</div>
-        <div class="mc-value">${M.fuelEff} <span style="font-size:14px; color:var(--text-soft); font-weight:600">km/L</span></div>
-        <div class="mc-trend">▲ 3.2% vs last month</div>
-      </div>
-      <div class="metric-card m-blue">
-        <div class="mc-label">Fleet Utilization</div>
-        <div class="mc-value">${M.utilization}<span style="font-size:18px">%</span></div>
-        <div class="mc-trend">▲ 5.1% vs last month</div>
-      </div>
-      <div class="metric-card m-orange">
-        <div class="mc-label">Operational Cost</div>
-        <div class="mc-value">${fmt$(M.opCost)}</div>
-        <div class="mc-trend" style="color:var(--warning)">▼ 1.4% vs last month</div>
-      </div>
-      <div class="metric-card m-amber">
-        <div class="mc-label">Vehicle ROI</div>
-        <div class="mc-value">${M.roi}<span style="font-size:18px">%</span></div>
-        <div class="mc-trend">▲ 2.8% vs last month</div>
-      </div>
-    </div>
-
-    <div class="analytics-grid">
-      <div class="panel">
-        <h2>Monthly Revenue <span class="h2-sub">2026</span></h2>
-        <div class="vbar-chart">
-          ${DATA.monthly.map(m => {
-            const h = (m.v / maxV) * 100;
-            return `
-              <div class="vbar-col">
-                <div class="vbar" style="height:${h}%"><span class="vbar-val">${m.v}k</span></div>
-                <div class="vbar-label">${m.m}</div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-        <div class="muted" style="font-size:11px; margin-top:10px; text-align:center">
-          Revenue in thousands ($) · YTD total: ${fmt$(DATA.monthly.reduce((s,m)=>s+m.v,0))}k
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2>Top Costliest Vehicles <span class="h2-sub">fuel + maint + other</span></h2>
-        <div class="hbars">
-          ${DATA.costliest.map(cv => {
-            const tot = cv.fuel + cv.maint + cv.other;
-            const fp = (cv.fuel / maxCost) * 100;
-            const mp = (cv.maint / maxCost) * 100;
-            const op = (cv.other / maxCost) * 100;
-            return `
-              <div class="hbar-row">
-                <div class="hbar-head">
-                  <b>${esc(cv.reg)}</b>
-                  <span>${fmt$(tot)}</span>
-                </div>
-                <div class="hbar-track">
-                  <div class="hbar-seg hs-fuel"  style="width:${fp.toFixed(1)}%"></div>
-                  <div class="hbar-seg hs-maint" style="width:${mp.toFixed(1)}%"></div>
-                  <div class="hbar-seg hs-other" style="width:${op.toFixed(1)}%"></div>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-        <div class="hbar-legend">
-          <div class="lg"><span class="lg-dot" style="background:#3D5A80"></span> Fuel</div>
-          <div class="lg"><span class="lg-dot" style="background:#F2A65A"></span> Maintenance</div>
-          <div class="lg"><span class="lg-dot" style="background:#E07A5F"></span> Other</div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-/* ============================================================
-   8. SETTINGS & RBAC
-   ============================================================ */
-function viewSettings(c) {
-  c.innerHTML = `
-    <div class="settings-grid">
-      <div class="panel">
-        <h2>General</h2>
-        <form class="form-stack" id="settings-form">
-          <label><span>Depot Name</span>
-            <input type="text" id="s-depot" value="${esc(APP.settings.depotName)}" />
-          </label>
-          <label><span>Currency</span>
-            <select id="s-cur">
-              ${['USD','EUR','GBP','INR','JPY','AUD','CAD'].map(x =>
-                `<option ${x===APP.settings.currency?'selected':''}>${x}</option>`).join('')}
-            </select>
-          </label>
-          <label><span>Distance Unit</span>
-            <select id="s-dist">
-              ${['km','mi'].map(x =>
-                `<option ${x===APP.settings.distanceUnit?'selected':''}>${x}</option>`).join('')}
-            </select>
-          </label>
-          <button type="submit" class="btn-primary-orange">Save Settings</button>
-        </form>
-      </div>
-
-      <div class="panel">
-        <h2>Role-Based Access (RBAC) <span class="h2-sub">granular permissions</span></h2>
-        <div class="table-wrap">
-          <table class="rbac-table">
-            <thead>
-              <tr>
-                <th style="text-align:left">Role</th>
-                <th>Fleet</th><th>Driver</th><th>Trips</th>
-                <th>Fuel/Exp</th><th>Analytics</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${Object.entries(DATA.rbac).map(([role, perms]) => `
-                <tr>
-                  <th>
-                    <span class="role-swatch" style="background:${
-                      { 'Fleet Manager':'#E07A5F', 'Dispatcher':'#3D5A80',
-                        'Safety Officer':'#81B29A', 'Financial Analyst':'#F2A65A' }[role]
-                    }"></span>${esc(role)}
-                  </th>
-                  ${['Fleet','Driver','Trips','Fuel/Exp','Analytics'].map(col => {
-                    const v = perms[col];
-                    if (v === 'full') return `<td><span class="check">✓</span></td>`;
-                    if (v === 'view') return `<td><span class="view">view</span></td>`;
-                    return `<td><span class="none">—</span></td>`;
-                  }).join('')}
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div class="muted" style="font-size:11px; margin-top:12px">
-          <span class="check">✓</span> = full access &nbsp;·&nbsp;
-          <span class="view" style="color:var(--info-light)">view</span> = read-only &nbsp;·&nbsp;
-          <span class="none">—</span> = no access
-        </div>
-      </div>
-    </div>
-  `;
-  $('#settings-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    APP.settings.depotName   = $('#s-depot').value;
-    APP.settings.currency    = $('#s-cur').value;
-    APP.settings.distanceUnit= $('#s-dist').value;
-    alert('Settings saved (demo).');
+  `, (root) => {
+    $('[data-modal-cancel]', root).addEventListener('click', modal.close);
+    $('#save-c', root).addEventListener('click', async () => {
+      try {
+        const r = await api(`/trips/${tripId}/complete`, { method: 'POST', body: {
+          end_odometer: +$('#f-odo', root).value,
+          fuel_used_liters: +$('#f-fuel', root).value,
+          revenue: +$('#f-rev', root).value,
+        }});
+        toast(r.message);
+        modal.close();
+        renderTrips(c);
+      } catch (err) { toast(err.message, 'error'); }
+    });
   });
 }
+
+// =================== Maintenance =================== //
+async function renderMaintenance(c) {
+  const [logs, vehicles] = await Promise.all([api('/maintenance'), api('/vehicles')]);
+  c.innerHTML = `
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>🛠️ Maintenance Logs</h3>
+        <button class="btn btn-primary" id="add-m">+ New Record</button>
+      </div>
+      <div class="table-wrap"><table id="m-list">
+        <thead><tr>
+          <th>Vehicle</th><th>Description</th><th>Cost</th><th>Start</th>
+          <th>End</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  `;
+  const tbody = $('#m-list tbody', c);
+  function draw(list) {
+    if (!list.length) { tbody.innerHTML = `<tr><td colspan="7" class="text-soft">No records.</td></tr>`; return; }
+    tbody.innerHTML = list.map(m => `
+      <tr>
+        <td><b>${escapeHtml(m.vehicle_reg)}</b><br><span class="text-soft">${escapeHtml(m.vehicle_name)}</span></td>
+        <td>${escapeHtml(m.description)}<br><span class="text-soft">${escapeHtml(m.notes || '')}</span></td>
+        <td>${fmtINR(m.cost)}</td>
+        <td>${escapeHtml(m.start_date)}</td>
+        <td>${escapeHtml(m.end_date || '—')}</td>
+        <td>${m.status === 'Open' ? '<span class="pill pill-amber">Open</span>' : '<span class="pill pill-green">Closed</span>'}</td>
+        <td class="actions">
+          ${m.status === 'Open' ? `<button class="btn btn-sm btn-success" data-close="${m.id}">Close</button>` : ''}
+          <button class="btn btn-sm btn-danger" data-del="${m.id}">Delete</button>
+        </td>
+      </tr>`).join('');
+  }
+  draw(logs);
+
+  tbody.addEventListener('click', async (e) => {
+    if (e.target.dataset.close) {
+      try { const r = await api(`/maintenance/${e.target.dataset.close}/close`, { method: 'POST' });
+        toast(r.message); renderMaintenance(c); }
+      catch (err) { toast(err.message, 'error'); }
+    }
+    if (e.target.dataset.del) {
+      if (!confirm('Delete this maintenance record?')) return;
+      await api(`/maintenance/${e.target.dataset.del}`, { method: 'DELETE' });
+      toast('Deleted'); renderMaintenance(c);
+    }
+  });
+  $('#add-m', c).addEventListener('click', () => openMaintForm(vehicles, async () => renderMaintenance(c)));
+}
+
+function openMaintForm(vehicles, onCreated) {
+  if (!vehicles.length) { toast('No vehicles to maintain', 'error'); return; }
+  modal.open('New Maintenance Record', `
+    <div class="form-row"><label>Vehicle*</label>
+      <select id="f-v">${vehicles.map(v =>
+        `<option value="${v.id}">${escapeHtml(v.reg_no)} — ${escapeHtml(v.name)}</option>`).join('')}</select></div>
+    <div class="form-row"><label>Description*</label><input id="f-desc" placeholder="Oil Change"/></div>
+    <div class="form-row"><label>Cost (₹)*</label><input id="f-cost" type="number" min="0" value="2000"/></div>
+    <div class="form-row"><label>Notes</label><textarea id="f-notes" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" data-modal-cancel>Cancel</button>
+      <button class="btn btn-primary" id="save-m">Create</button>
+    </div>
+  `, (root) => {
+    $('[data-modal-cancel]', root).addEventListener('click', modal.close);
+    $('#save-m', root).addEventListener('click', async () => {
+      try {
+        const r = await api('/maintenance', { method: 'POST', body: {
+          vehicle_id: +$('#f-v', root).value,
+          description: $('#f-desc', root).value,
+          cost: +$('#f-cost', root).value,
+          notes: $('#f-notes', root).value,
+        }});
+        toast(r.message);
+        modal.close();
+        onCreated();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+}
+
+// =================== Fuel & Expenses =================== //
+async function renderFuel(c) {
+  const [fuel, expenses, vehicles] = await Promise.all([api('/fuel'), api('/expenses'), api('/vehicles')]);
+  c.innerHTML = `
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>⛽ Fuel Logs</h3>
+        <button class="btn btn-primary" id="add-fuel">+ Add Fuel</button>
+      </div>
+      <div class="table-wrap"><table id="f-table">
+        <thead><tr><th>Date</th><th>Vehicle</th><th>Liters</th><th>Cost</th><th>Odometer</th></tr></thead>
+        <tbody>${fuel.length ? fuel.map(f => `
+          <tr><td>${escapeHtml(f.log_date)}</td><td>${escapeHtml(f.vehicle_reg)}</td>
+              <td>${f.liters}</td><td>${fmtINR(f.cost)}</td><td>${fmtKm(f.odometer_km)} km</td></tr>
+        `).join('') : `<tr><td colspan="5" class="text-soft">No fuel logs.</td></tr>`}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>💸 Other Expenses</h3>
+        <button class="btn btn-primary" id="add-exp">+ Add Expense</button>
+      </div>
+      <div class="table-wrap"><table id="e-table">
+        <thead><tr><th>Date</th><th>Vehicle</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
+        <tbody>${expenses.length ? expenses.map(e => `
+          <tr><td>${escapeHtml(e.expense_date)}</td><td>${escapeHtml(e.vehicle_reg || '—')}</td>
+              <td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.description || '')}</td>
+              <td>${fmtINR(e.amount)}</td></tr>
+        `).join('') : `<tr><td colspan="5" class="text-soft">No expenses.</td></tr>`}</tbody>
+      </table></div>
+    </div>
+  `;
+  $('#add-fuel', c).addEventListener('click', () => openFuelForm(vehicles, () => renderFuel(c)));
+  $('#add-exp', c).addEventListener('click', () => openExpenseForm(vehicles, () => renderFuel(c)));
+}
+
+function openFuelForm(vehicles, onSaved) {
+  modal.open('Add Fuel Log', `
+    <div class="form-row"><label>Vehicle*</label>
+      <select id="f-v">${vehicles.map(v =>
+        `<option value="${v.id}">${escapeHtml(v.reg_no)} — ${escapeHtml(v.name)}</option>`).join('')}</select></div>
+    <div class="form-row"><label>Liters*</label><input id="f-liters" type="number" min="0" step="0.1" value="10"/></div>
+    <div class="form-row"><label>Cost (₹)*</label><input id="f-cost" type="number" min="0" value="1200"/></div>
+    <div class="form-row"><label>Date*</label><input id="f-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    <div class="form-row"><label>Odometer (km)</label><input id="f-odo" type="number" min="0" value="0"/></div>
+    <div class="modal-actions">
+      <button class="btn" data-modal-cancel>Cancel</button>
+      <button class="btn btn-primary" id="save-f">Save</button>
+    </div>
+  `, (root) => {
+    $('[data-modal-cancel]', root).addEventListener('click', modal.close);
+    $('#save-f', root).addEventListener('click', async () => {
+      try {
+        await api('/fuel', { method: 'POST', body: {
+          vehicle_id: +$('#f-v', root).value,
+          liters: +$('#f-liters', root).value,
+          cost: +$('#f-cost', root).value,
+          log_date: $('#f-date', root).value,
+          odometer_km: +$('#f-odo', root).value,
+        }});
+        toast('Fuel log saved'); modal.close(); onSaved();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+}
+
+function openExpenseForm(vehicles, onSaved) {
+  modal.open('Add Expense', `
+    <div class="form-row"><label>Vehicle</label>
+      <select id="f-v"><option value="">—</option>${vehicles.map(v =>
+        `<option value="${v.id}">${escapeHtml(v.reg_no)} — ${escapeHtml(v.name)}</option>`).join('')}</select></div>
+    <div class="form-row"><label>Category*</label>
+      <select id="f-cat">
+        <option>Toll</option><option>Parking</option><option>Driver Allowance</option><option>Misc</option>
+      </select></div>
+    <div class="form-row"><label>Description</label><input id="f-desc"/></div>
+    <div class="form-row"><label>Amount (₹)*</label><input id="f-amount" type="number" min="0" value="200"/></div>
+    <div class="form-row"><label>Date*</label><input id="f-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    <div class="modal-actions">
+      <button class="btn" data-modal-cancel>Cancel</button>
+      <button class="btn btn-primary" id="save-e">Save</button>
+    </div>
+  `, (root) => {
+    $('[data-modal-cancel]', root).addEventListener('click', modal.close);
+    $('#save-e', root).addEventListener('click', async () => {
+      try {
+        await api('/expenses', { method: 'POST', body: {
+          vehicle_id: $('#f-v', root).value || null,
+          category: $('#f-cat', root).value,
+          description: $('#f-desc', root).value,
+          amount: +$('#f-amount', root).value,
+          expense_date: $('#f-date', root).value,
+        }});
+        toast('Expense saved'); modal.close(); onSaved();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+}
+
+// =================== Reports =================== //
+async function renderReports(c) {
+  const metrics = await api('/metrics');
+  c.innerHTML = `
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>📈 Vehicle Metrics</h3>
+        <div class="flex gap-1">
+          <button class="btn" id="export-csv">📥 Export CSV</button>
+          <button class="btn" id="export-pdf">📄 Export PDF</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="m-table">
+        <thead><tr>
+          <th>Reg</th><th>Name</th><th>Type</th><th>Status</th>
+          <th>Distance (km)</th><th>Fuel (L)</th><th>Eff. (km/L)</th>
+          <th>Fuel ₹</th><th>Maint ₹</th><th>Op. ₹</th><th>Revenue</th><th>ROI</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h3>⛽ Fuel Efficiency (km / liter)</h3>
+      <div class="bar-chart" id="chart-eff"></div>
+    </div>
+    <div class="card">
+      <h3>💰 Operational Cost</h3>
+      <div class="bar-chart" id="chart-cost"></div>
+    </div>
+    <div class="card">
+      <h3>📈 Vehicle ROI (%)</h3>
+      <div class="bar-chart" id="chart-roi"></div>
+    </div>
+  `;
+  const tbody = $('#m-table tbody', c);
+  function draw(list) {
+    tbody.innerHTML = list.map(m => `
+      <tr>
+        <td><b>${escapeHtml(m.reg_no)}</b></td>
+        <td>${escapeHtml(m.name)}</td>
+        <td>${escapeHtml(m.type)}</td>
+        <td>${statusPill(m.status)}</td>
+        <td>${fmtKm(m.distance_km)}</td>
+        <td>${m.fuel_liters.toFixed(1)}</td>
+        <td>${m.fuel_efficiency.toFixed(2)}</td>
+        <td>${fmtINR(m.fuel_cost)}</td>
+        <td>${fmtINR(m.maintenance_cost)}</td>
+        <td>${fmtINR(m.operational_cost)}</td>
+        <td>${fmtINR(m.revenue)}</td>
+        <td>${m.roi_pct.toFixed(2)}%</td>
+      </tr>
+    `).join('') || `<tr><td colspan="12" class="text-soft">No data.</td></tr>`;
+  }
+  draw(metrics);
+
+  // Bar charts
+  drawBars('#chart-eff', metrics.map(m => ({ label: m.reg_no, value: m.fuel_efficiency, max: Math.max(...metrics.map(x=>x.fuel_efficiency), 1), unit: ' km/L' })));
+  drawBars('#chart-cost', metrics.map(m => ({ label: m.reg_no, value: m.operational_cost, max: Math.max(...metrics.map(x=>x.operational_cost), 1), unit: ' ₹' })));
+  drawBars('#chart-roi', metrics.map(m => ({ label: m.reg_no, value: m.roi_pct, max: Math.max(...metrics.map(x=>x.roi_pct), 1), unit: ' %' })));
+
+  // CSV export
+  $('#export-csv', c).addEventListener('click', () => {
+    const headers = ['Reg','Name','Type','Status','Distance','Fuel L','Eff km/L','Fuel Cost','Maint Cost','Op Cost','Revenue','ROI %'];
+    const rows = metrics.map(m => [m.reg_no, m.name, m.type, m.status, m.distance_km, m.fuel_liters, m.fuel_efficiency, m.fuel_cost, m.maintenance_cost, m.operational_cost, m.revenue, m.roi_pct]);
+    const csv = [headers, ...rows].map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `transitops_report_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  });
+
+  // PDF (printable HTML) export
+  $('#export-pdf', c).addEventListener('click', () => {
+    const html = `<!doctype html><html><head><title>TransitOps Report</title>
+      <style>body{font-family:Arial;margin:30px;color:#0f172a}
+      h1{color:#4f46e5}table{width:100%;border-collapse:collapse;font-size:12px}
+      th,td{border:1px solid #cbd5e1;padding:6px;text-align:left}
+      th{background:#e0e7ff}</style></head><body>
+      <h1>🚚 TransitOps — Operations Report</h1>
+      <p>Generated: ${new Date().toLocaleString()}</p>
+      <table><thead><tr>
+      <th>Reg</th><th>Name</th><th>Type</th><th>Status</th>
+      <th>Distance</th><th>Fuel L</th><th>Eff</th>
+      <th>Fuel Cost</th><th>Maint</th><th>Op</th><th>Rev</th><th>ROI</th>
+      </tr></thead><tbody>
+      ${metrics.map(m => `<tr>
+        <td>${m.reg_no}</td><td>${m.name}</td><td>${m.type}</td><td>${m.status}</td>
+        <td>${m.distance_km.toFixed(0)}</td><td>${m.fuel_liters.toFixed(1)}</td>
+        <td>${m.fuel_efficiency.toFixed(2)}</td>
+        <td>${m.fuel_cost.toFixed(0)}</td><td>${m.maintenance_cost.toFixed(0)}</td>
+        <td>${m.operational_cost.toFixed(0)}</td><td>${m.revenue.toFixed(0)}</td>
+        <td>${m.roi_pct.toFixed(2)}%</td>
+      </tr>`).join('')}
+      </tbody></table>
+      <script>window.onload=()=>window.print();</script>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+  });
+}
+
+function drawBars(sel, items) {
+  const root = $(sel);
+  if (!items.length) { root.innerHTML = '<p class="text-soft">No data.</p>'; return; }
+  root.innerHTML = items.map(it => `
+    <div class="bar">
+      <div class="bar-label">${escapeHtml(it.label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(it.value / it.max * 100).toFixed(1)}%"></div></div>
+      <div class="bar-value">${it.value.toFixed(2)}${it.unit || ''}</div>
+    </div>`).join('');
+}
+
+// =================== Notifications =================== //
+async function renderNotifications(c) {
+  const list = await api('/notifications');
+  c.innerHTML = `
+    <div class="card">
+      <div class="flex-between mb-1">
+        <h3>🔔 Notifications</h3>
+        <button class="btn" id="mark-read">Mark all as read</button>
+      </div>
+      ${list.length ? list.map(n => `
+        <div class="card" style="margin-bottom:.5rem">
+          <div>${n.kind === 'license_expiry' && n.message.includes('EXPIRED') ? '❌' :
+                  n.kind === 'license_expiry' ? '⚠️' : 'ℹ️'} ${escapeHtml(n.message)}</div>
+          <div class="text-soft" style="font-size:.8rem">${escapeHtml(n.created_at)}</div>
+        </div>
+      `).join('') : '<p class="text-soft">All clear — no outstanding notifications.</p>'}
+    </div>
+  `;
+  $('#mark-read', c)?.addEventListener('click', async () => {
+    await api('/notifications/read-all', { method: 'POST' });
+    updateNotifBadge(); renderNotifications(c);
+  });
+}
+
+// =================== Users =================== //
+async function renderUsers(c) {
+  if (state.user.role !== 'Fleet Manager') {
+    c.innerHTML = `<div class="card"><p>⚠️ Only Fleet Managers can manage users.</p></div>`;
+    return;
+  }
+  const users = await api('/users');
+  c.innerHTML = `
+    <div class="card">
+      <h3>👥 User Management</h3>
+      <div class="table-wrap"><table id="u-list">
+        <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>${users.map(u => `
+          <tr>
+            <td>${u.id}</td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td>
+            <td>${statusPill(u.role)}</td><td>${escapeHtml(u.created_at)}</td>
+            <td><button class="btn btn-sm btn-danger" data-del="${u.id}">Delete</button></td>
+          </tr>
+        `).join('')}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h3>+ Add User</h3>
+      <div class="form-row"><label>Name*</label><input id="f-name"/></div>
+      <div class="form-row"><label>Email*</label><input id="f-email" type="email"/></div>
+      <div class="form-row"><label>Password*</label><input id="f-pw" type="password"/></div>
+      <div class="form-row"><label>Role*</label>
+        <select id="f-role">
+          <option>Fleet Manager</option><option>Driver</option>
+          <option>Safety Officer</option><option>Financial Analyst</option>
+        </select></div>
+      <button class="btn btn-primary" id="save-u">Create User</button>
+    </div>
+  `;
+  $('#u-list', c).addEventListener('click', async (e) => {
+    if (e.target.dataset.del) {
+      if (!confirm('Delete this user?')) return;
+      await api(`/users/${e.target.dataset.del}`, { method: 'DELETE' });
+      toast('Deleted'); renderUsers(c);
+    }
+  });
+  $('#save-u', c).addEventListener('click', async () => {
+    try {
+      await api('/users', { method: 'POST', body: {
+        name: $('#f-name', c).value,
+        email: $('#f-email', c).value,
+        password: $('#f-pw', c).value,
+        role: $('#f-role', c).value,
+      }});
+      toast('User created'); renderUsers(c);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+// =================== Boot =================== //
+(async function boot() {
+  try {
+    const { user } = await api('/auth/me');
+    state.user = user;
+    showApp();
+  } catch {
+    showLogin();
+  }
+})();
