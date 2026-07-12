@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TransitOps — Smart Transport Operations Platform</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🚚%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <!-- ============================================================= -->
+  <!-- 0. SPLIT-SCREEN AUTH PAGE                                     -->
+  <!-- ============================================================= -->
+  <div id="auth-page" class="auth-page">
+    <div class="auth-grid">
+      <!-- LEFT: brand panel -->
+      <aside class="auth-left">
+        <div class="auth-brand">
+          <div class="auth-logo">🚚 TransitOps</div>
+          <p class="auth-tagline">Smart Transport Operations Platform</p>
+        </div>
+        <div class="auth-roles">
+          <h2>One login, four roles:</h2>
+          <ul>
+            <li><span class="role-dot role-orange"></span> Fleet Manager</li>
+            <li><span class="role-dot role-blue"></span> Dispatcher</li>
+            <li><span class="role-dot role-green"></span> Safety Officer</li>
+            <li><span class="role-dot role-amber"></span> Financial Analyst</li>
+          </ul>
+        </div>
+        <p class="auth-foot">© 2026 Vaelos · TransitOps</p>
+      </aside>
+
+      <!-- RIGHT: dark mode login card -->
+      <main class="auth-right">
+        <div class="auth-card">
+          <h1 class="auth-title">Welcome back</h1>
+          <p class="auth-sub">Sign in to your operations console</p>
+
+          <form id="login-form" class="auth-form" autocomplete="off">
+            <label>
+              <span>Email</span>
+              <input type="email" id="email" required placeholder="raven@transitops.com" />
+            </label>
+            <label>
+              <span>Password</span>
+              <input type="password" id="password" required placeholder="••••••••" />
+            </label>
+            <label>
+              <span>Role (RBAC)</span>
+              <select id="role" required>
+                <option value="Dispatcher">Dispatcher</option>
+                <option value="Fleet Manager">Fleet Manager</option>
+                <option value="Safety Officer">Safety Officer</option>
+                <option value="Financial Analyst">Financial Analyst</option>
+              </select>
+            </label>
+
+            <div class="auth-row">
+              <label class="remember">
+                <input type="checkbox" id="remember" />
+                <span>Remember me</span>
+              </label>
+              <a href="#" class="forgot">Forgot password?</a>
+            </div>
+
+            <button type="submit" class="btn-primary-orange">Sign In</button>
+          </form>
+
+          <!-- Error state: red dotted border alert -->
+          <div id="login-error" class="alert-error hidden">
+            <strong>Error state:</strong> Invalid credentials. Please verify your email, password, and role.
+          </div>
+
+          <p class="auth-hint">Demo · <b>raven@transitops.com</b> / <b>demo123</b> · any role</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- MAIN APP SHELL (hidden until login)                            -->
+  <!-- ============================================================= -->
+  <div id="app" class="app hidden">
+    <!-- LEFT NAV -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="sb-logo">🚚</span>
+        <span class="sb-name">TransitOps</span>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">📊</span><span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-page="fleet">
+          <span class="nav-icon">🚐</span><span>Fleet</span>
+        </button>
+        <button class="nav-item" data-page="drivers">
+          <span class="nav-icon">👤</span><span>Drivers</span>
+        </button>
+        <button class="nav-item" data-page="trips">
+          <span class="nav-icon">📦</span><span>Trips</span>
+        </button>
+        <button class="nav-item" data-page="maintenance">
+          <span class="nav-icon">🛠️</span><span>Maintenance</span>
+        </button>
+        <button class="nav-item" data-page="fuel">
+          <span class="nav-icon">⛽</span><span>Fuel &amp; Expenses</span>
+        </button>
+        <button class="nav-item" data-page="analytics">
+          <span class="nav-icon">📈</span><span>Analytics</span>
+        </button>
+        <button class="nav-item" data-page="settings">
+          <span class="nav-icon">⚙️</span><span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <button id="logout-btn" class="nav-item logout">🚪 Logout</button>
+      </div>
+    </aside>
+
+    <!-- MAIN COLUMN -->
+    <div class="main-col">
+      <!-- TOP HEADER -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="page-title">Dashboard</h1>
+        </div>
+        <div class="topbar-center">
+          <div class="search-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="search" id="global-search" placeholder="Search vehicles, drivers, trips…" />
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="user-profile">
+            <span class="user-name">Raven K.</span>
+            <span class="user-avatar">RK</span>
+          </div>
+          <span class="role-pill" id="role-pill">Dispatcher [RX]</span>
+        </div>
+      </header>
+
+      <!-- CONTENT -->
+      <section id="content" class="content"></section>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
