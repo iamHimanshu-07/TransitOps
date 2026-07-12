@@ -164,13 +164,15 @@ app.get('/api/fuel', authRequired, (req, res) => {
   res.json(ops.listFuel(req.query.vehicle_id ? +req.query.vehicle_id : null));
 });
 app.post('/api/fuel', authRequired, (req, res) => {
-  ops.addFuel(req.body); res.json({ ok: true });
+  try { ops.addFuel(req.body); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/expenses', authRequired, (req, res) => {
   res.json(ops.listExpenses(req.query.vehicle_id ? +req.query.vehicle_id : null));
 });
 app.post('/api/expenses', authRequired, (req, res) => {
-  ops.addExpense(req.body); res.json({ ok: true });
+  try { ops.addExpense(req.body); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ----------------------------- ANALYTICS ----------------------------- //

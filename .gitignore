@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# SQLite database and WAL sidecars (regenerated on first run)
+transitops.db
+transitops.db-wal
+transitops.db-shm
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local env overrides
+.env
+.env.local
