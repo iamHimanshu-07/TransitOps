@@ -55,8 +55,7 @@ That's it.
 | 🦺 Safety Officer | `sarah@transitops.com` | `safety123` |
 | 💰 Financial Analyst | `felix@transitops.com` | `finance123` |
 
-The **Fleet Manager** is the only role that can manage users. Every other
-role gets a read-optimized view of the same data.
+The **Fleet Manager** is the only role that can manage users. Every other role gets a read-optimized view of the same data.
 
 ---
 
@@ -91,24 +90,8 @@ role gets a read-optimized view of the same data.
 8. Cancelling a dispatched trip → both restored to *Available*.
 9. Creating maintenance → vehicle becomes *In Shop*.
 10. Closing maintenance → vehicle becomes *Available* (unless *Retired*).
-11. Deleting a vehicle/driver with history → cascades through trips, fuel
-    logs, expenses, and maintenance. *On-Trip* vehicles/drivers must be
-    cancelled or completed first.
-
----
-
-## 🖼️ UI
-
-- **Sidebar** (left): role-aware nav with the current user, role pill, and
-  logout at the bottom.
-- **Topbar**: page title on the left; on the right — a **gradient logo
-  pill** (🚚), the **notification bell** with an unread badge, and a
-  **theme toggle** (☀️/🌙). Click the logo to jump back to the dashboard.
-- **Theme**: pure white (default) and dark. State is persisted in
-  `localStorage`.
-- **No build step** — `public/` is served as-is. Refresh the browser to
-  pick up local edits.
-
+11. Deleting a vehicle/driver with history → cascades through trips, fuel logs, expenses, and maintenance. *On-Trip* vehicles/drivers must be cancelled or completed first.
+    
 ---
 
 ## 🧪 Verify It Works
