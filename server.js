@@ -94,7 +94,7 @@ app.put('/api/vehicles/:id', authRequired, (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/vehicles/:id', authRequired, (req, res) => {
-  try { ops.deleteVehicle(+req.params.id); res.json({ ok: true }); }
+  try { const r = ops.deleteVehicle(+req.params.id); res.json(r); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -114,7 +114,7 @@ app.put('/api/drivers/:id', authRequired, (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/drivers/:id', authRequired, (req, res) => {
-  try { ops.deleteDriver(+req.params.id); res.json({ ok: true }); }
+  try { const r = ops.deleteDriver(+req.params.id); res.json(r); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -156,7 +156,8 @@ app.post('/api/maintenance/:id/close', authRequired, (req, res) => {
   res.json({ ok: true, message: msg });
 });
 app.delete('/api/maintenance/:id', authRequired, (req, res) => {
-  ops.deleteMaintenance(+req.params.id); res.json({ ok: true });
+  try { const r = ops.deleteMaintenance(+req.params.id); res.json(r); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ----------------------------- FUEL & EXPENSES ----------------------------- //

@@ -50,7 +50,31 @@ function updateVehicle(id, fields) {
   args.push(id);
   db.prepare(`UPDATE vehicles SET ${sets.join(', ')} WHERE id = ?`).run(...args);
 }
-function deleteVehicle(id) { db.prepare('DELETE FROM vehicles WHERE id = ?').run(id); }
+function deleteVehicle(id) {
+  const v = getVehicle(id);
+  if (!v) throw new Error('Vehicle not found.');
+  // Block deleting an On-Trip vehicle — must cancel/complete first
+  if (v.status === 'On Trip') {
+    throw new Error('Cannot delete a vehicle that is On Trip. Cancel or complete the trip first.');
+  }
+  const tx = db.transaction(() => {
+    // Cascade is set on FKs, but we also clean up notifications and any
+    // trip-linked fuel/expense rows explicitly to keep the audit clean.
+    const tripIds = db.prepare('SELECT id FROM trips WHERE vehicle_id = ?').all(id).map(r => r.id);
+    if (tripIds.length) {
+      const placeholders = tripIds.map(() => '?').join(',');
+      db.prepare(`UPDATE fuel_logs SET trip_id = NULL WHERE trip_id IN (${placeholders})`).run(...tripIds);
+      db.prepare(`UPDATE expenses  SET trip_id = NULL WHERE trip_id IN (${placeholders})`).run(...tripIds);
+    }
+    db.prepare('DELETE FROM maintenance WHERE vehicle_id = ?').run(id);
+    db.prepare('DELETE FROM fuel_logs   WHERE vehicle_id = ?').run(id);
+    db.prepare('DELETE FROM expenses    WHERE vehicle_id = ?').run(id);
+    db.prepare('DELETE FROM trips       WHERE vehicle_id = ?').run(id);
+    db.prepare('DELETE FROM vehicles    WHERE id = ?').run(id);
+  });
+  tx();
+  return { ok: true, message: `Vehicle ${v.reg_no} deleted.` };
+}
 
 // ============================== DRIVERS ============================== //
 function listDrivers(filters = {}) {
@@ -81,7 +105,28 @@ function updateDriver(id, fields) {
   db.prepare(`UPDATE drivers SET ${sets.join(', ')} WHERE id = ?`).run(...args);
   recomputeLicenseNotifications();
 }
-function deleteDriver(id) { db.prepare('DELETE FROM drivers WHERE id = ?').run(id); }
+function deleteDriver(id) {
+  const d = getDriver(id);
+  if (!d) throw new Error('Driver not found.');
+  if (d.status === 'On Trip') {
+    throw new Error('Cannot delete a driver who is On Trip. Cancel or complete the trip first.');
+  }
+  const tx = db.transaction(() => {
+    const tripIds = db.prepare('SELECT id FROM trips WHERE driver_id = ?').all(id).map(r => r.id);
+    if (tripIds.length) {
+      const placeholders = tripIds.map(() => '?').join(',');
+      db.prepare(`UPDATE fuel_logs SET trip_id = NULL WHERE trip_id IN (${placeholders})`).run(...tripIds);
+      db.prepare(`UPDATE expenses  SET trip_id = NULL WHERE trip_id IN (${placeholders})`).run(...tripIds);
+    }
+    db.prepare('DELETE FROM trips    WHERE driver_id = ?').run(id);
+    db.prepare('DELETE FROM drivers  WHERE id = ?').run(id);
+    // Clean up any license-expiry notifications for this driver
+    db.prepare('DELETE FROM notifications WHERE kind = ? AND target_id = ?').run('license_expiry', id);
+  });
+  tx();
+  recomputeLicenseNotifications();
+  return { ok: true, message: `Driver ${d.name} deleted.` };
+}
 
 // ============================== TRIPS ============================== //
 function isDriverAssignable(d) {
@@ -239,7 +284,25 @@ function closeMaintenance(mid) {
   tx();
   return [true, 'Maintenance closed. Vehicle restored to Available.'];
 }
-function deleteMaintenance(mid) { db.prepare('DELETE FROM maintenance WHERE id = ?').run(mid); }
+function deleteMaintenance(mid) {
+  const r = db.prepare('SELECT * FROM maintenance WHERE id = ?').get(mid);
+  if (!r) return { ok: true, message: 'Maintenance record already removed.' };
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM maintenance WHERE id = ?').run(mid);
+    // If the vehicle was In Shop and has no other open maintenance, restore it
+    const stillOpen = db.prepare(
+      "SELECT COUNT(*) c FROM maintenance WHERE vehicle_id = ? AND status = 'Open'"
+    ).get(r.vehicle_id).c;
+    if (stillOpen === 0) {
+      const v = getVehicle(r.vehicle_id);
+      if (v && v.status === 'In Shop') {
+        db.prepare(`UPDATE vehicles SET status='Available' WHERE id=?`).run(r.vehicle_id);
+      }
+    }
+  });
+  tx();
+  return { ok: true, message: 'Maintenance record deleted.' };
+}
 
 // ============================== FUEL & EXPENSES ============================== //
 function listFuel(vid = null) {

@@ -1,11 +1,26 @@
 # 🚚 TransitOps
 
-> Smart Transport Operations Platform — fleet, drivers, trips, maintenance, fuel, expenses, and ROI analytics in one self-contained Node.js app.
+> **Smart Transport Operations Platform** — fleet, drivers, trips, maintenance, fuel, expenses, and ROI analytics in one self-contained Node.js app.
 
 [![Tests](https://img.shields.io/badge/tests-30%20passing-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-blue)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Stack](https://img.shields.io/badge/stack-Express%20%2B%20SQLite-lightgrey)]()
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
+
+---
+
+## ✨ What is TransitOps?
+
+TransitOps is a single-binary-grade web app for transport businesses. It gives
+a small fleet operations team the same workflows a 200-truck carrier would
+expect — dispatch, maintenance, fuel, expenses, ROI — without any SaaS lock-in
+or monthly bill. Sign in, get a live operations dashboard, dispatch a trip,
+close a maintenance ticket, and export your monthly P&L in under a minute.
+
+The whole thing is **one Node.js process + one SQLite file**. No Docker
+required, no build step, no bundler. The frontend is vanilla HTML/CSS/JS and
+served straight from `public/`.
 
 ---
 
@@ -23,9 +38,11 @@ npm install
 npm start
 ```
 
-Open **http://localhost:3000** and sign in with one of the demo accounts below. That's it.
+Open **http://localhost:3000** and sign in with one of the demo accounts below.
+That's it.
 
-> The SQLite database (`transitops.db`) is auto-created and seeded on first run — no extra setup.
+> The SQLite database (`transitops.db`) is auto-created and seeded on first
+> run — no extra setup, no migrations to apply.
 
 ---
 
@@ -38,23 +55,27 @@ Open **http://localhost:3000** and sign in with one of the demo accounts below. 
 | 🦺 Safety Officer | `sarah@transitops.com` | `safety123` |
 | 💰 Financial Analyst | `felix@transitops.com` | `finance123` |
 
+The **Fleet Manager** is the only role that can manage users. Every other
+role gets a read-optimized view of the same data.
+
 ---
 
-## ✨ What You Get
+## 🧩 Modules
 
 | Module | Highlights |
 |---|---|
-| **Auth & RBAC** | JWT in `httpOnly` cookie · 4 roles · password hashing with bcrypt |
+| **Auth & RBAC** | JWT in `httpOnly` cookie · 4 roles · bcrypt password hashing |
 | **Dashboard** | Live KPIs: vehicles on trip, available, in shop, drivers on duty, fleet utilization % |
-| **Vehicles** | CRUD with unique reg, max load, odometer, region, cost, status |
-| **Drivers** | License, expiry, safety score, status, auto-flagged expired licenses |
+| **Vehicles** | Full CRUD with unique reg, max load, odometer, region, cost, status · cascade delete |
+| **Drivers** | License, expiry, safety score, status, auto-flagged expired licenses · cascade delete |
 | **Trips** | Draft → Dispatched → Completed → Cancelled with transactional state changes |
-| **Maintenance** | Auto-flips vehicle *In Shop* on open, restores *Available* on close |
+| **Maintenance** | Auto-flips vehicle *In Shop* on open, restores *Available* on close · delete restores vehicle if no other open records |
 | **Fuel & Expenses** | Per-vehicle logs, auto-rollup of operational cost |
 | **Analytics** | Fuel efficiency, operational cost, **Vehicle ROI = (Revenue − Maint − Fuel) ÷ Acquisition** |
 | **Notifications** | License expiry: already-expired + within 60 days |
+| **User management** | Fleet Manager can add/delete users; built-in seed for 4 roles |
 | **Exports** | CSV for metrics, print-to-PDF for any view |
-| **UI** | Light/dark mode, persisted in `localStorage`, single-page, no build step |
+| **UI** | Polished white/dark theme toggle, persisted in `localStorage`, single-page, no build step |
 
 ---
 
@@ -66,10 +87,27 @@ Open **http://localhost:3000** and sign in with one of the demo accounts below. 
 4. A driver or vehicle already *On Trip* cannot take another trip.
 5. Cargo weight must **not exceed** the vehicle's max load.
 6. Dispatching → both vehicle & driver become *On Trip*.
-7. Completing → both become *Available*.
+7. Completing → both become *Available*; odometer and fuel log updated.
 8. Cancelling a dispatched trip → both restored to *Available*.
 9. Creating maintenance → vehicle becomes *In Shop*.
 10. Closing maintenance → vehicle becomes *Available* (unless *Retired*).
+11. Deleting a vehicle/driver with history → cascades through trips, fuel
+    logs, expenses, and maintenance. *On-Trip* vehicles/drivers must be
+    cancelled or completed first.
+
+---
+
+## 🖼️ UI
+
+- **Sidebar** (left): role-aware nav with the current user, role pill, and
+  logout at the bottom.
+- **Topbar**: page title on the left; on the right — a **gradient logo
+  pill** (🚚), the **notification bell** with an unread badge, and a
+  **theme toggle** (☀️/🌙). Click the logo to jump back to the dashboard.
+- **Theme**: pure white (default) and dark. State is persisted in
+  `localStorage`.
+- **No build step** — `public/` is served as-is. Refresh the browser to
+  pick up local edits.
 
 ---
 
@@ -104,16 +142,17 @@ Output:
 ============================================================
 ```
 
-The suite rebuilds the DB from scratch, then exercises every business rule end-to-end.
+The suite rebuilds the DB from scratch, then exercises every business rule
+end-to-end. Run it after every change — it takes under a second.
 
 ---
 
 ## 🧱 Tech Stack
 
-- **Node.js** ≥ 18 (CommonJS) · **Express 4**
-- **SQLite** via `better-sqlite3` (WAL mode, foreign keys on)
-- **JWT** in `httpOnly` cookie + **bcryptjs** password hashing
-- **Frontend:** vanilla HTML/CSS/JS — no bundler, no build step
+- **Backend:** Node.js ≥ 18 (CommonJS) · Express 4
+- **DB:** SQLite via `better-sqlite3` (WAL mode, foreign keys on, cascade deletes)
+- **Auth:** JWT in `httpOnly` cookie + `bcryptjs` password hashing
+- **Frontend:** vanilla HTML/CSS/JS — no bundler, no build step, no framework
 
 ---
 
@@ -151,28 +190,36 @@ TransitOps-Smart-Transport-Operations-Platform/
 └── LICENSE                # MIT
 ```
 
-`transitops.db` (and its `-wal` / `-shm` sidecars) are created at runtime and git-ignored.
+`transitops.db` (and its `-wal` / `-shm` sidecars) are created at runtime
+and git-ignored.
 
 ---
 
 ## 🔁 Walk-Through: A Complete Trip
 
 1. **Sign in** as Fleet Manager.
-2. Open **Vehicles** → confirm `VAN-05` exists, status *Available*, max load 500 kg.
+2. Open **Vehicles** → confirm `VAN-05` exists, status *Available*, max load
+   500 kg.
 3. Open **Drivers** → confirm `Alex Kumar` exists, license valid.
-4. **Trips** → New → Source `Mumbai`, Destination `Pune`, Vehicle `VAN-05`, Driver `Alex`, Cargo `450` kg → Save (status: *Draft*).
+4. **Trips** → New → Source `Mumbai`, Destination `Pune`, Vehicle `VAN-05`,
+   Driver `Alex`, Cargo `450` kg → Save (status: *Draft*).
 5. **Dispatch** → vehicle and driver flip to *On Trip*.
-6. **Complete** with end odometer `12680`, fuel `23` L, revenue `13000` → both flip back to *Available*, odometer updated.
+6. **Complete** with end odometer `12680`, fuel `23` L, revenue `13000` →
+   both flip back to *Available*, odometer updated.
 7. **Maintenance** → New for `VAN-05` → vehicle flips to *In Shop*.
 8. **Close maintenance** → vehicle flips back to *Available*.
-9. **Reports** → VAN-05 now shows distance, fuel efficiency, operational cost, and ROI.
+9. **Reports** → VAN-05 now shows distance, fuel efficiency, operational
+   cost, and ROI.
+10. **Delete** a vehicle or driver that has history → it cascades
+    cleanly through trips, fuel, expenses, and maintenance in a single
+    transaction.
 
 ---
 
 ## 🔌 REST API
 
-All endpoints (except `POST /api/auth/login`) require auth via the `token` cookie
-or `Authorization: Bearer <token>` header.
+All endpoints (except `POST /api/auth/login`) require auth via the `token`
+cookie or `Authorization: Bearer <token>` header.
 
 ### Auth
 | Method | Path | Notes |
@@ -185,24 +232,34 @@ or `Authorization: Bearer <token>` header.
 `GET /api/users` · `POST /api/users` · `DELETE /api/users/:id`
 
 ### Vehicles
-`GET /api/vehicles?type=&status=&region=` · `GET /api/vehicles/:id` · `POST /api/vehicles` · `PUT /api/vehicles/:id` · `DELETE /api/vehicles/:id`
+`GET /api/vehicles?type=&status=&region=` · `GET /api/vehicles/:id` ·
+`POST /api/vehicles` · `PUT /api/vehicles/:id` ·
+`DELETE /api/vehicles/:id` (cascades related rows)
 
 ### Drivers
-`GET /api/drivers?status=` · `GET /api/drivers/:id` · `POST /api/drivers` · `PUT /api/drivers/:id` · `DELETE /api/drivers/:id`
+`GET /api/drivers?status=` · `GET /api/drivers/:id` ·
+`POST /api/drivers` · `PUT /api/drivers/:id` ·
+`DELETE /api/drivers/:id` (cascades related rows)
 
 ### Trips
-`GET /api/trips?status=` · `POST /api/trips` · `POST /api/trips/:id/dispatch` · `POST /api/trips/:id/complete` · `POST /api/trips/:id/cancel`
+`GET /api/trips?status=` · `POST /api/trips` ·
+`POST /api/trips/:id/dispatch` · `POST /api/trips/:id/complete` ·
+`POST /api/trips/:id/cancel`
 
 ### Maintenance
-`GET /api/maintenance?vehicle_id=` · `POST /api/maintenance` · `POST /api/maintenance/:id/close` · `DELETE /api/maintenance/:id`
+`GET /api/maintenance?vehicle_id=` · `POST /api/maintenance` ·
+`POST /api/maintenance/:id/close` · `DELETE /api/maintenance/:id`
 
 ### Fuel & Expenses
-`GET /api/fuel?vehicle_id=` · `POST /api/fuel` · `GET /api/expenses?vehicle_id=` · `POST /api/expenses`
+`GET /api/fuel?vehicle_id=` · `POST /api/fuel` ·
+`GET /api/expenses?vehicle_id=` · `POST /api/expenses`
 
 ### Analytics
-`GET /api/kpis` · `GET /api/metrics` · `GET /api/notifications` · `POST /api/notifications/read-all`
+`GET /api/kpis` · `GET /api/metrics` ·
+`GET /api/notifications` · `POST /api/notifications/read-all`
 
-All `POST` handlers return `{ ok: true, message }` on success or `400 { error }` on validation failure.
+All `POST` / `PUT` / `DELETE` handlers return `{ ok: true, message }` on
+success or `400 { error: "..." }` on validation failure.
 
 ---
 
@@ -236,7 +293,8 @@ JWT_SECRET=$(openssl rand -hex 32) npm start
 ```
 
 **Behind a reverse proxy (nginx, Caddy, etc.):**
-Set `X-Forwarded-For` trust on Express if you later add rate-limiting by IP. Currently no rate-limit middleware is included.
+Set `X-Forwarded-For` trust on Express if you later add rate-limiting by IP.
+Currently no rate-limit middleware is included.
 
 ---
 
@@ -249,6 +307,20 @@ Set `X-Forwarded-For` trust on Express if you later add rate-limiting by IP. Cur
 | `npm test` complains about a locked DB | Stop any running `npm start` instance — the test harness deletes and recreates the DB file. |
 | Login returns 401 | Make sure you're using the seeded emails exactly (lowercase, no extra spaces). |
 | Stale UI after editing `public/` | Hard refresh (Ctrl+Shift+R) — no bundler means no automatic cache busting. |
+| Delete on a vehicle with history used to fail | Fixed — cascade deletes via `ON DELETE CASCADE` and explicit transactional cleanup. |
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repo.
+2. Create a feature branch (`git checkout -b feat/some-thing`).
+3. Make your change. **Run `npm test` and confirm all 30 cases still pass.**
+4. Commit (`git commit -m "feat: add some-thing"`).
+5. Push (`git push origin feat/some-thing`).
+6. Open a pull request describing the change and the test evidence.
+
+Please keep PRs small and focused; one feature or fix per PR.
 
 ---
 
@@ -259,6 +331,8 @@ Set `X-Forwarded-For` trust on Express if you later add rate-limiting by IP. Cur
 - Server-rendered PDF (e.g. `pdfkit`) instead of browser print
 - Dockerfile + `docker-compose.yml` for one-command startup
 - Rate limiting and request validation middleware (e.g. `zod`)
+- Webhooks for trip status changes
+- Mobile-first PWA mode
 
 ---
 

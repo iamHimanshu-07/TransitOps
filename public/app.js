@@ -7,9 +7,8 @@ let state = {
   user: null,
   page: 'dashboard',
   cache: {},
-  theme: localStorage.getItem('theme') || 'light',
+  theme: localStorage.getItem('theme') || 'white',
 };
-
 // Apply theme as soon as possible to avoid flash
 document.documentElement.setAttribute('data-theme', state.theme);
 
@@ -62,6 +61,7 @@ function showApp() {
   $('#user-name').textContent = state.user.name;
   $('#user-role').textContent = state.user.role;
   buildNav();
+  updateThemeButton();
   navigate(state.page);
 }
 
@@ -87,10 +87,22 @@ $('#logout-btn').addEventListener('click', async () => {
 });
 
 $('#theme-toggle').addEventListener('click', () => {
-  state.theme = state.theme === 'dark' ? 'light' : 'dark';
+  // Toggle between white and dark
+  state.theme = state.theme === 'dark' ? 'white' : 'dark';
   document.documentElement.setAttribute('data-theme', state.theme);
   localStorage.setItem('theme', state.theme);
+  updateThemeButton();
 });
+
+function updateThemeButton() {
+  const labels = { white: '🌙', dark: '☀️' };
+  const titles = { white: 'Switch to dark theme', dark: 'Switch to white theme' };
+  const btn = $('#theme-toggle');
+  if (btn) {
+    btn.textContent = labels[state.theme] || '🌙';
+    btn.title = titles[state.theme] || 'Toggle theme';
+  }
+}
 
 // =================== Navigation =================== //
 const NAV_ITEMS = [
@@ -176,6 +188,12 @@ async function updateNotifBadge() {
     badge.classList.toggle('hidden', unread === 0);
   } catch {}
 }
+// Prevent the topbar logo link from reloading the page
+$('#topbar-logo').addEventListener('click', (e) => {
+  e.preventDefault();
+  navigate('dashboard');
+});
+
 $('#notif-bell').addEventListener('click', () => navigate('notifications'));
 
 // =================== Dashboard =================== //
@@ -356,8 +374,12 @@ async function renderVehicles(c) {
       const list = await api('/vehicles'); draw(list);
     });
     if (delId) {
-      if (confirm('Delete this vehicle?')) {
-        try { await api(`/vehicles/${delId}`, { method: 'DELETE' }); toast('Deleted'); renderVehicles(c); }
+      if (confirm('Delete this vehicle? This will also remove its trips, fuel logs, expenses, and maintenance records.')) {
+        try {
+          const r = await api(`/vehicles/${delId}`, { method: 'DELETE' });
+          toast(r.message || 'Deleted');
+          const list = await api('/vehicles'); draw(list);
+        }
         catch (err) { toast(err.message, 'error'); }
       }
     }
@@ -475,8 +497,12 @@ async function renderDrivers(c) {
       const list = await api('/drivers'); draw(list);
     });
     if (delId) {
-      if (confirm('Delete this driver?')) {
-        try { await api(`/drivers/${delId}`, { method: 'DELETE' }); toast('Deleted'); renderDrivers(c); }
+      if (confirm('Delete this driver? This will also remove their trips from history.')) {
+        try {
+          const r = await api(`/drivers/${delId}`, { method: 'DELETE' });
+          toast(r.message || 'Deleted');
+          const list = await api('/drivers'); draw(list);
+        }
         catch (err) { toast(err.message, 'error'); }
       }
     }
@@ -717,8 +743,10 @@ async function renderMaintenance(c) {
     }
     if (e.target.dataset.del) {
       if (!confirm('Delete this maintenance record?')) return;
-      await api(`/maintenance/${e.target.dataset.del}`, { method: 'DELETE' });
-      toast('Deleted'); renderMaintenance(c);
+      try {
+        const r = await api(`/maintenance/${e.target.dataset.del}`, { method: 'DELETE' });
+        toast(r.message || 'Deleted'); renderMaintenance(c);
+      } catch (err) { toast(err.message, 'error'); }
     }
   });
   $('#add-m', c).addEventListener('click', () => openMaintForm(vehicles, async () => renderMaintenance(c)));

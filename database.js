@@ -64,8 +64,8 @@ function init() {
       dispatched_at TEXT,
       completed_at TEXT,
       created_at TEXT NOT NULL,
-      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
-      FOREIGN KEY (driver_id) REFERENCES drivers(id)
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+      FOREIGN KEY (driver_id) REFERENCES drivers(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS maintenance (
@@ -78,7 +78,7 @@ function init() {
       status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open','Closed')),
       notes TEXT,
       created_at TEXT NOT NULL,
-      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS fuel_logs (
@@ -90,8 +90,8 @@ function init() {
       log_date TEXT NOT NULL,
       odometer_km REAL,
       created_at TEXT NOT NULL,
-      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
-      FOREIGN KEY (trip_id) REFERENCES trips(id)
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS expenses (
@@ -103,8 +103,8 @@ function init() {
       amount REAL NOT NULL,
       expense_date TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
-      FOREIGN KEY (trip_id) REFERENCES trips(id)
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS notifications (

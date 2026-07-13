@@ -38,13 +38,11 @@
   <!-- Main app -->
   <div id="app" class="app hidden">
     <aside class="sidebar">
-      <div class="brand small">🚚 TransitOps</div>
       <div class="user-info">
         <div class="user-name" id="user-name">—</div>
         <span class="pill pill-blue" id="user-role">—</span>
       </div>
       <nav id="nav"></nav>
-      <button id="theme-toggle" class="btn btn-ghost btn-block">🌓 Toggle theme</button>
       <button id="logout-btn" class="btn btn-ghost btn-block">🚪 Logout</button>
     </aside>
 
@@ -52,7 +50,11 @@
       <header class="topbar">
         <h1 id="page-title">Dashboard</h1>
         <div class="topbar-right">
-          <button id="notif-bell" class="bell">🔔 <span id="notif-count" class="badge hidden">0</span></button>
+          <a href="#" id="topbar-logo" class="topbar-logo" title="TransitOps" aria-label="TransitOps">
+            <span class="topbar-logo-icon" aria-hidden="true">🚚</span>
+          </a>
+          <button id="notif-bell" class="bell" aria-label="Notifications">🔔 <span id="notif-count" class="badge hidden">0</span></button>
+          <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">🌙</button>
         </div>
       </header>
       <section id="content" class="content"></section>
