@@ -197,6 +197,21 @@ Please keep PRs small and focused; one feature or fix per PR.
 
 ---
 
+## ☁️ Deploying to Render (one-click)
+
+This repo includes a [Render Blueprint](./render.yaml) that provisions the web service **and** the persistent disk SQLite needs (Render's filesystem is otherwise wiped on every redeploy).
+
+1. Push these changes to GitHub (see commands below).
+2. Go to **<https://render.com/blueprints>** → **New Blueprint Instance**.
+3. Connect the `iamHimanshu-07/TransitOps` repo → Render reads `render.yaml` and creates the service with a 1 GB disk mounted at `/data`, `JWT_SECRET` auto-generated, Node 20.
+4. Wait for the first build. Once the URL shows 🚚, log in with `admin@transitops.com` / `admin123` and change the demo passwords.
+
+**Manual deploy (no Blueprint):** New → Web Service → connect repo → Build `npm install` · Start `npm start` · Add env `JWT_SECRET` (random hex) and `DATA_DIR=/data` · Add a Disk mounted at `/data` (1 GB).
+
+> **Why the disk?** SQLite + `better-sqlite3` write to disk; without `/data` mounted, every redeploy or instance restart resets the DB to a fresh seed.
+
+---
+
 ## 📄 License
 
 [MIT](./LICENSE) — free for commercial and personal use. Demo passwords are seeded for convenience only.

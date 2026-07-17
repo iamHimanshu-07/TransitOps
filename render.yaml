@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: transitops
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/auth/me
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: transitops-data
+      mountPath: /data
+      sizeGB: 1
