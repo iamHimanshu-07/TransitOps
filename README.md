@@ -199,16 +199,16 @@ Please keep PRs small and focused; one feature or fix per PR.
 
 ## ☁️ Deploying to Render (one-click)
 
-This repo includes a [Render Blueprint](./render.yaml) that provisions the web service **and** the persistent disk SQLite needs (Render's filesystem is otherwise wiped on every redeploy).
+This repo includes a [Render Blueprint](./render.yaml) that provisions the web service **and** a free managed Postgres database (Render's free tier doesn't support persistent disks, so we use Postgres for durable storage).
 
-1. Push these changes to GitHub (see commands below).
+1. Push these changes to GitHub.
 2. Go to **<https://render.com/blueprints>** → **New Blueprint Instance**.
-3. Connect the `iamHimanshu-07/TransitOps` repo → Render reads `render.yaml` and creates the service with a 1 GB disk mounted at `/data`, `JWT_SECRET` auto-generated, Node 20.
-4. Wait for the first build. Once the URL shows 🚚, log in with `admin@transitops.com` / `admin123` and change the demo passwords.
+3. Connect the `iamHimanshu-07/TransitOps` repo → Render reads `render.yaml` and creates the service + database, auto-injects `DATABASE_URL`, and auto-generates `JWT_SECRET`.
+4. Wait ~3 min for the first build. Once the URL shows 🚚, log in with `admin@transitops.com` / `admin123` and **change the demo password immediately**.
 
-**Manual deploy (no Blueprint):** New → Web Service → connect repo → Build `npm install` · Start `npm start` · Add env `JWT_SECRET` (random hex) and `DATA_DIR=/data` · Add a Disk mounted at `/data` (1 GB).
+**Manual deploy (no Blueprint):** New → Web Service → connect repo → Build `npm install` · Start `npm start` · Add env `JWT_SECRET` (random hex) · Provision a free Postgres database and add the env `DATABASE_URL` (Render provides this automatically when you link a database to the service).
 
-> **Why the disk?** SQLite + `better-sqlite3` write to disk; without `/data` mounted, every redeploy or instance restart resets the DB to a fresh seed.
+**Local dev:** runs on SQLite at `./transitops.db` — no env vars, no setup. To test against Postgres locally, set `DATABASE_URL=postgresql://...` and the same `node server.js` will use Postgres instead.
 
 ---
 

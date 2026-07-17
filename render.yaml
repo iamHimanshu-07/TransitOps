@@ -11,9 +11,9 @@ services:
         value: 20.18.0
       - key: JWT_SECRET
         generateValue: true
-      - key: DATA_DIR
-        value: /data
-    disk:
-      name: transitops-data
-      mountPath: /data
-      sizeGB: 1
+
+databases:
+  - name: transitops-db
+    plan: free
+    databaseName: transitops
+    user: transitops
