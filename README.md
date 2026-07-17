@@ -1,4 +1,4 @@
-# 🚚 TransitOps
+# 🚚 TransitOps - Smart Transport Operations Platform
 
 > **Smart Transport Operations Platform** — fleet, drivers, trips, maintenance, fuel, expenses, and ROI analytics in one self-contained Node.js app.
 
