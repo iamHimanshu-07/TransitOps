@@ -49,6 +49,16 @@ function requireRole(...roles) {
   };
 }
 
+app.get('/healthz', async (req, res) => {
+    try {
+      // Touch the DB to prove the connection is live.
+      await require('./database').db.prepare('SELECT 1 AS ok').get();
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(503).json({ ok: false, error: e.message });
+    }
+});
+
 // ----------------------------- AUTH ----------------------------- //
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
