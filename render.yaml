@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: npm start
-    healthCheckPath: /api/auth/me
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
         value: 20.18.0
