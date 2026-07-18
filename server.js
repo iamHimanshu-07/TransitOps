@@ -10,7 +10,15 @@ const jwt = require('jsonwebtoken');
 const { init, verifyUser, recomputeLicenseNotifications } = require('./database');
 const ops = require('./operations');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'transitops-dev-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: JWT_SECRET is required in production. Set it in Render → Environment.');
+    process.exit(1);
+  }
+  console.warn('WARNING: JWT_SECRET not set — using insecure dev fallback. Do NOT use this in production.');
+}
+const JWT_SECRET_FINAL = JWT_SECRET || 'transitops-dev-secret-change-me';
 
 const app = express();
 app.use(express.json());
@@ -23,8 +31,8 @@ app.use(cookieParser());
     await init();
     await recomputeLicenseNotifications();
   } catch (e) {
-    console.error('DB init failed:', e);
-    process.exit(1);
+    console.error('FATAL: DB init failed:', e);
+    setTimeout(() => process.exit(1), 500); // small delay so logs flush
   }
 })();
 
@@ -33,7 +41,7 @@ function authRequired(req, res, next) {
                 (req.headers.authorization || '').replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    req.user = jwt.verify(token, JWT_SECRET_FINAL);
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
@@ -59,6 +67,29 @@ app.get('/healthz', async (req, res) => {
     }
 });
 
+// Temporary diagnostic — confirms DB driver + table row counts.
+// Remove after verifying the deployment is healthy.
+app.get('/api/_debug', authRequired, async (req, res) => {
+  try {
+    const { db, driver } = require('./database');
+    const tables = ['users','vehicles','drivers','trips','maintenance','fuel_logs','expenses','notifications'];
+    const counts = {};
+    for (const t of tables) {
+      counts[t] = (await db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get()).c;
+    }
+    res.json({
+      driver,
+      hasDatabaseUrl: !!process.env.DATABASE_URL,
+      databaseUrlHost: process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).host : null,
+      counts,
+      nodeEnv: process.env.NODE_ENV,
+      port: process.env.PORT,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ----------------------------- AUTH ----------------------------- //
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
@@ -67,7 +98,7 @@ app.post('/api/auth/login', async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
   const token = jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role },
-    JWT_SECRET,
+    JWT_SECRET_FINAL,
     { expiresIn: '12h' }
   );
   res.cookie('token', token, { httpOnly: true, sameSite: 'lax' });

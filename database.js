@@ -338,6 +338,7 @@ let pgPool;         // the PG pool, only set in PG mode
 
 async function init() {
   if (USING_PG) {
+    console.log('[db] driver: postgres (DATABASE_URL is set)');
     const { Pool } = require('pg');
     pgPool = new Pool({
       connectionString: process.env.DATABASE_URL,
@@ -346,9 +347,22 @@ async function init() {
     db = makePgAdapter(pgPool);
     dbDriver = 'pg';
     for (const t of SCHEMA_PG_TABLES) {
-      await db.exec(pgCreateTableSql(t));
+      try {
+        await db.exec(pgCreateTableSql(t));
+      } catch (e) {
+        console.error('[db] CREATE TABLE failed for definition:', t.slice(0, 80) + '...');
+        throw e;
+      }
     }
   } else {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'DATABASE_URL is not set in production. ' +
+        'Link the Postgres database in Render → Service → Info → Linked Resources, ' +
+        'or set DATABASE_URL in the Environment tab.'
+      );
+    }
+    console.warn('[db] driver: sqlite (DATABASE_URL not set — local dev only, NOT for production)');
     db = makeSqliteAdapter();
     dbDriver = 'sqlite';
     db.exec(SCHEMA_SQLITE);
@@ -356,7 +370,12 @@ async function init() {
 
   // Seed if empty
   const r = await db.prepare('SELECT COUNT(*) AS c FROM users').get();
-  if (r.c === 0) await seed();
+  if (r.c === 0) {
+    console.log('[db] users table empty — seeding initial data');
+    await seed();
+  } else {
+    console.log(`[db] users table has ${r.c} rows — skipping seed`);
+  }
   await recomputeLicenseNotifications();
 }
 
